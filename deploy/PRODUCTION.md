@@ -2,8 +2,8 @@
 
 This project is set up to run like the HR system:
 
-- `nginx` serves the Angular frontend on public port `8081`
-- `nginx` proxies `/api/*` to the Java backend on `127.0.0.1:8082`
+- `nginx` serves the Angular frontend on public port `8082`
+- `nginx` proxies `/api/*` to the Java backend on `127.0.0.1:8083`
 - `docker compose` keeps MySQL running in background
 - `systemd` keeps the Java backend running in background
 
@@ -26,7 +26,7 @@ Recommended production values:
 
 ```env
 HOST=127.0.0.1
-PORT=8082
+PORT=8083
 
 MYSQL_BIN=/usr/bin/mysql
 DB_HOST=127.0.0.1
@@ -79,13 +79,13 @@ sudo systemctl restart nginx
 The app will be available at:
 
 ```bash
-http://YOUR_SERVER_IP:8081
+http://YOUR_SERVER_IP:8082
 ```
 
 ## Notes
 
 - The frontend now uses same-origin `/api` requests, so nginx should be the public entry point.
-- The checked-in production nginx template assumes backend `127.0.0.1:8082`.
+- The checked-in production nginx template assumes backend `127.0.0.1:8083`.
 - The backend reads config from environment variables:
   - `HOST`
   - `PORT`

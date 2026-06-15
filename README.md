@@ -23,7 +23,7 @@ cd backend-java
 ./run.sh
 ```
 
-Java backend runs on `http://localhost:8080` by default, but production should use a private port such as `127.0.0.1:8082`.
+Java backend runs on `http://localhost:8080` by default, but production should use a private port such as `127.0.0.1:8083`.
 
 ## Database
 
