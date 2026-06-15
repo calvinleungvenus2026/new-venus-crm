@@ -1,0 +1,13 @@
+import fs from 'node:fs/promises';
+import { FileBlob, SpreadsheetFile } from '@oai/artifact-tool';
+const filePath = '/Users/clavinleung/Desktop/venus-crm/outputs/mock-crm-framework/VenusLondonTechCRMdata.xlsx';
+const companies = ['Book Keeping Man Limited','CALO DE CONSULTING SERVICES PTE LIMITED','DP Consulting Limited','EVICITY ELECTRICAL LTD','FOODSNOMILES LIMITED','Fu Cheung Equipment Limited','J7Pro Limited','Last Mile Delivery Limited','LUMORASHOP LTD','Products & Pricing','Sevene Group Limited','TZWOWO LTD','Xianyi Limited','Zentrixmarket Ltd'];
+const input = await FileBlob.load(filePath);
+const workbook = await SpreadsheetFile.importXlsx(input);
+const sheet = workbook.worksheets.getItem('Sheet1');
+sheet.getRange('A2:A15').values = companies.map(name => [name]);
+sheet.getRange('A16:A20').values = Array.from({ length: 5 }, () => ['']);
+const check = await workbook.inspect({ kind: 'table', range: 'Sheet1!A1:A20', include: 'values', tableMaxRows: 20, tableMaxCols: 1 });
+console.log(check.ndjson);
+const output = await SpreadsheetFile.exportXlsx(workbook);
+await output.save(filePath);

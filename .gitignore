@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.angular/
+frontend-angular/node_modules/
+frontend-angular/dist/
+backend-java/out/
+backend-java/.env.local
+mysql-data/
+secrets/
+.DS_Store

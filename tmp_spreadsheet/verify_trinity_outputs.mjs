@@ -1,0 +1,3 @@
+import { FileBlob, SpreadsheetFile } from '@oai/artifact-tool';
+const paths = ['/Users/clavinleung/Desktop/venus-crm/outputs/mock-crm-framework/TrinityLondonCRMdata.xlsx','/Users/clavinleung/Desktop/venus-crm/outputs/mock-crm-framework/TrinityPropertyCRMData.xlsx'];
+for (const p of paths) { const input = await FileBlob.load(p); const wb = await SpreadsheetFile.importXlsx(input); const rows = p.includes('Property') ? 12 : 12; const check = await wb.inspect({ kind: 'table', range: 'Sheet1!A1:J12', include: 'values', tableMaxRows: rows, tableMaxCols: 10 }); console.log('FILE:' + p); console.log(check.ndjson); }
