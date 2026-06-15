@@ -23,6 +23,10 @@ Per-company workbook source:
    `VENUS_CRM_XLSX_PATH`
    `TRINITY_PROPERTY_CRM_XLSX_PATH`
    `TRINITY_CONCIERGE_CRM_XLSX_PATH`
+   `RIPPLESOFT_CRM_XLSX_PATH`
+   `RIPPLE_MIC_CRM_XLSX_PATH`
+   `LUMINARYTECH_CRM_XLSX_PATH`
+   `MOMENTUM_GROWTH_CRM_XLSX_PATH`
 3. When a company workbook path is present, that company reads from its `.xlsx` file instead of Google Drive folders
 4. Companies without a workbook path continue using the Google Drive fallback
 
@@ -38,6 +42,10 @@ Supported company mappings:
 - `venus` -> `GOOGLE_DRIVE_VENUS_FOLDER_ID`
 - `trinity-property` -> `GOOGLE_DRIVE_TRINITY_PROPERTY_FOLDER_ID`
 - `trinity-concierge` -> `GOOGLE_DRIVE_TRINITY_CONCIERGE_FOLDER_ID`
+- `ripplesoft` -> `GOOGLE_DRIVE_RIPPLESOFT_FOLDER_ID`
+- `ripple-mic` -> `GOOGLE_DRIVE_RIPPLE_MIC_FOLDER_ID`
+- `luminarytech` -> `GOOGLE_DRIVE_LUMINARYTECH_FOLDER_ID`
+- `momentum-growth` -> `GOOGLE_DRIVE_MOMENTUM_GROWTH_FOLDER_ID`
 
 Example:
 

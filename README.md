@@ -20,6 +20,7 @@ Angular dev server runs on `http://localhost:4200`.
 
 ```bash
 cd backend-java
+sudo apt install -y maven
 ./run.sh
 ```
 

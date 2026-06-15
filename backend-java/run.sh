@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-if [ -f ".env.local" ]; then
+if [ -f ".env.local" ] && [ -z "${INVOCATION_ID:-}" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       ''|'#'*) continue ;;
@@ -18,9 +18,9 @@ elif [ -x "/usr/local/bin/mvn" ]; then
   MVN_CMD="/usr/local/bin/mvn"
 else
   echo "Maven is not installed."
-  echo "Install it with: brew install maven"
+  echo "Install Maven and ensure 'mvn' is on PATH."
   exit 1
 fi
 
-"$MVN_CMD" -q -DskipTests package
-java -jar target/backend-java-0.1.0.jar
+"$MVN_CMD" -q -DskipTests -Dmaven.compiler.release=21 -Dmaven.compiler.source=21 -Dmaven.compiler.target=21 compile dependency:build-classpath -Dmdep.outputFile=target/classpath.txt
+java -cp "target/classes:$(cat target/classpath.txt)" com.venuscrm.api.CrmServer

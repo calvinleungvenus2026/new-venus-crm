@@ -28,7 +28,6 @@ Recommended production values:
 HOST=127.0.0.1
 PORT=8083
 
-MYSQL_BIN=/usr/bin/mysql
 DB_HOST=127.0.0.1
 DB_PORT=3309
 DB_NAME=venus_crm
@@ -43,6 +42,17 @@ cd /path/to/venus-crm/frontend-angular
 npm ci
 npm run build
 ```
+
+## 3.5 Build backend
+
+Install Maven once on the server:
+
+```bash
+sudo apt update
+sudo apt install -y maven
+```
+
+Then the backend service can build and run the packaged jar automatically.
 
 ## 4. Install backend service
 
@@ -89,7 +99,6 @@ http://YOUR_SERVER_IP:8082
 - The backend reads config from environment variables:
   - `HOST`
   - `PORT`
-  - `MYSQL_BIN`
   - `DB_HOST`
   - `DB_PORT`
   - `DB_NAME`
