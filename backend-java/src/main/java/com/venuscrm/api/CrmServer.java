@@ -23,6 +23,11 @@ import java.security.PrivateKey;
 import java.security.Signature;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.KeySpec;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.Statement;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -47,12 +52,13 @@ import org.w3c.dom.NodeList;
 public final class CrmServer {
     private static final int PORT = envInt("PORT", 8080);
     private static final String SERVER_HOST = env("HOST", "127.0.0.1");
-    private static final String MYSQL_BIN = env("MYSQL_BIN", "/opt/homebrew/bin/mysql");
     private static final String DB_HOST = env("DB_HOST", "127.0.0.1");
     private static final String DB_PORT = env("DB_PORT", "3309");
     private static final String DB_NAME = env("DB_NAME", "venus_crm");
     private static final String DB_USER = env("DB_USER", "venus_app");
     private static final String DB_PASSWORD = env("DB_PASSWORD", "venus_password");
+    private static final String JDBC_URL = "jdbc:mysql://" + DB_HOST + ":" + DB_PORT + "/" + DB_NAME
+        + "?allowMultiQueries=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC";
     private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
     private static final Base64.Encoder BASE64_URL_ENCODER = Base64.getUrlEncoder().withoutPadding();
     private static final Pattern JSON_STRING_PATTERN_TEMPLATE =
@@ -1846,46 +1852,38 @@ public final class CrmServer {
         }
     }
 
+    private static Connection openConnection() throws Exception {
+        return DriverManager.getConnection(JDBC_URL, DB_USER, DB_PASSWORD);
+    }
+
     private static String runMysqlQuery(String sql) throws Exception {
-        ProcessBuilder builder = new ProcessBuilder(
-            MYSQL_BIN,
-            "--host=" + DB_HOST,
-            "--port=" + DB_PORT,
-            "--user=" + DB_USER,
-            "--password=" + DB_PASSWORD,
-            "--database=" + DB_NAME,
-            "--batch",
-            "--raw",
-            "--skip-column-names",
-            "-e",
-            sql
-        );
-        Process process = builder.start();
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        String errors = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-        int code = process.waitFor();
-        if (code != 0) {
-            throw new IOException(errors.isBlank() ? "mysql query failed" : errors);
+        try (Connection connection = openConnection(); Statement statement = connection.createStatement()) {
+            try (ResultSet resultSet = statement.executeQuery(sql)) {
+                StringBuilder output = new StringBuilder();
+                ResultSetMetaData metadata = resultSet.getMetaData();
+                int columnCount = metadata.getColumnCount();
+
+                while (resultSet.next()) {
+                    for (int column = 1; column <= columnCount; column += 1) {
+                        if (column > 1) {
+                            output.append('\t');
+                        }
+                        String value = resultSet.getString(column);
+                        if (value != null) {
+                            output.append(value);
+                        }
+                    }
+                    output.append('\n');
+                }
+
+                return output.toString().trim();
+            }
         }
-        return output.trim();
     }
 
     private static void runMysqlUpdate(String sql) throws Exception {
-        ProcessBuilder builder = new ProcessBuilder(
-            MYSQL_BIN,
-            "--host=" + DB_HOST,
-            "--port=" + DB_PORT,
-            "--user=" + DB_USER,
-            "--password=" + DB_PASSWORD,
-            "--database=" + DB_NAME,
-            "-e",
-            sql
-        );
-        Process process = builder.start();
-        String errors = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-        int code = process.waitFor();
-        if (code != 0) {
-            throw new IOException(errors.isBlank() ? "mysql update failed" : errors);
+        try (Connection connection = openConnection(); Statement statement = connection.createStatement()) {
+            statement.execute(sql);
         }
     }
 
@@ -2334,11 +2332,19 @@ public final class CrmServer {
             putIfPresent(companyWorkbooks, "venus", env.get("VENUS_CRM_XLSX_PATH"));
             putIfPresent(companyWorkbooks, "trinity-property", env.get("TRINITY_PROPERTY_CRM_XLSX_PATH"));
             putIfPresent(companyWorkbooks, "trinity-concierge", env.get("TRINITY_CONCIERGE_CRM_XLSX_PATH"));
+            putIfPresent(companyWorkbooks, "ripplesoft", env.get("RIPPLESOFT_CRM_XLSX_PATH"));
+            putIfPresent(companyWorkbooks, "ripple-mic", env.get("RIPPLE_MIC_CRM_XLSX_PATH"));
+            putIfPresent(companyWorkbooks, "luminarytech", env.get("LUMINARYTECH_CRM_XLSX_PATH"));
+            putIfPresent(companyWorkbooks, "momentum-growth", env.get("MOMENTUM_GROWTH_CRM_XLSX_PATH"));
 
             Map<String, String> companyDriveWorkbookFileNames = new HashMap<>();
             putIfPresent(companyDriveWorkbookFileNames, "venus", env.get("VENUS_CRM_DRIVE_FILE_NAME"));
             putIfPresent(companyDriveWorkbookFileNames, "trinity-property", env.get("TRINITY_PROPERTY_CRM_DRIVE_FILE_NAME"));
             putIfPresent(companyDriveWorkbookFileNames, "trinity-concierge", env.get("TRINITY_CONCIERGE_CRM_DRIVE_FILE_NAME"));
+            putIfPresent(companyDriveWorkbookFileNames, "ripplesoft", env.get("RIPPLESOFT_CRM_DRIVE_FILE_NAME"));
+            putIfPresent(companyDriveWorkbookFileNames, "ripple-mic", env.get("RIPPLE_MIC_CRM_DRIVE_FILE_NAME"));
+            putIfPresent(companyDriveWorkbookFileNames, "luminarytech", env.get("LUMINARYTECH_CRM_DRIVE_FILE_NAME"));
+            putIfPresent(companyDriveWorkbookFileNames, "momentum-growth", env.get("MOMENTUM_GROWTH_CRM_DRIVE_FILE_NAME"));
 
             if (companyWorkbooks.isEmpty()
                 && companyDriveWorkbookFileNames.isEmpty()
@@ -2350,6 +2356,10 @@ public final class CrmServer {
             putIfPresent(companyFolders, "venus", env.get("GOOGLE_DRIVE_VENUS_FOLDER_ID"));
             putIfPresent(companyFolders, "trinity-property", env.get("GOOGLE_DRIVE_TRINITY_PROPERTY_FOLDER_ID"));
             putIfPresent(companyFolders, "trinity-concierge", env.get("GOOGLE_DRIVE_TRINITY_CONCIERGE_FOLDER_ID"));
+            putIfPresent(companyFolders, "ripplesoft", env.get("GOOGLE_DRIVE_RIPPLESOFT_FOLDER_ID"));
+            putIfPresent(companyFolders, "ripple-mic", env.get("GOOGLE_DRIVE_RIPPLE_MIC_FOLDER_ID"));
+            putIfPresent(companyFolders, "luminarytech", env.get("GOOGLE_DRIVE_LUMINARYTECH_FOLDER_ID"));
+            putIfPresent(companyFolders, "momentum-growth", env.get("GOOGLE_DRIVE_MOMENTUM_GROWTH_FOLDER_ID"));
 
             return new AppConfig(serviceAccountJsonPath, companyWorkbooks, companyDriveWorkbookFileNames, companyFolders);
         }

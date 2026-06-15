@@ -152,7 +152,7 @@ export class AppComponent {
   private readonly storageKey = 'venus-crm-angular-auth';
   private readonly resetMarkerKey = 'venus-crm-data-reset-v1';
   private readonly pageSize = 15;
-  private readonly apiBaseUrl = '';
+  private readonly apiBaseUrl = this.resolveApiBaseUrl();
 
   email = signal('admin-crm@venuslondontechnology.co.uk');
   password = signal('testtest123');
@@ -189,6 +189,19 @@ export class AppComponent {
     if (this.authToken()) {
       this.restoreSession();
     }
+  }
+
+  private resolveApiBaseUrl() {
+    if (typeof window === 'undefined') {
+      return '';
+    }
+
+    const { hostname, port } = window.location;
+    if ((hostname === 'localhost' || hostname === '127.0.0.1') && port === '4200') {
+      return 'http://127.0.0.1:8080';
+    }
+
+    return '';
   }
 
   onEmailChange(value: string) {
