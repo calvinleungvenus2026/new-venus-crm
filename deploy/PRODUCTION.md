@@ -55,6 +55,8 @@ and replace:
 Then run:
 
 ```bash
+chmod +x /path/to/venus-crm/backend-java/run.sh
+sudo cp deploy/venus-crm-backend.service /etc/systemd/system/venus-crm-backend.service
 sudo systemctl daemon-reload
 sudo systemctl enable venus-crm-backend
 sudo systemctl start venus-crm-backend
