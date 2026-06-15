@@ -45,7 +45,14 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
 public final class CrmServer {
-    private static final int PORT = 8080;
+    private static final int PORT = envInt("PORT", 8080);
+    private static final String SERVER_HOST = env("HOST", "127.0.0.1");
+    private static final String MYSQL_BIN = env("MYSQL_BIN", "/opt/homebrew/bin/mysql");
+    private static final String DB_HOST = env("DB_HOST", "127.0.0.1");
+    private static final String DB_PORT = env("DB_PORT", "3309");
+    private static final String DB_NAME = env("DB_NAME", "venus_crm");
+    private static final String DB_USER = env("DB_USER", "venus_app");
+    private static final String DB_PASSWORD = env("DB_PASSWORD", "venus_password");
     private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
     private static final Base64.Encoder BASE64_URL_ENCODER = Base64.getUrlEncoder().withoutPadding();
     private static final Pattern JSON_STRING_PATTERN_TEMPLATE =
@@ -75,7 +82,7 @@ public final class CrmServer {
         } catch (Exception error) {
             throw new IOException("Failed to initialize database schema: " + error.getMessage(), error);
         }
-        HttpServer server = HttpServer.create(new InetSocketAddress(PORT), 0);
+        HttpServer server = HttpServer.create(new InetSocketAddress(SERVER_HOST, PORT), 0);
         server.createContext("/api/auth/login", new LoginHandler());
         server.createContext("/api/auth/me", new AuthMeHandler());
         server.createContext("/api/auth/logout", new LogoutHandler());
@@ -89,7 +96,7 @@ public final class CrmServer {
         server.createContext("/api/project-rows/save", new ProjectRowsSaveHandler());
         server.createContext("/api/project-rows/delete", new ProjectRowsDeleteHandler());
         server.start();
-        System.out.println("Venus CRM Java backend listening on http://localhost:" + PORT);
+        System.out.println("Venus CRM Java backend listening on http://" + SERVER_HOST + ":" + PORT);
     }
 
     private static final class LoginHandler implements HttpHandler {
@@ -1819,14 +1826,34 @@ public final class CrmServer {
         }
     }
 
+    private static String env(String key, String fallback) {
+        String value = System.getenv(key);
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        return value;
+    }
+
+    private static int envInt(String key, int fallback) {
+        String value = System.getenv(key);
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException error) {
+            return fallback;
+        }
+    }
+
     private static String runMysqlQuery(String sql) throws Exception {
         ProcessBuilder builder = new ProcessBuilder(
-            "/opt/homebrew/bin/mysql",
-            "--host=127.0.0.1",
-            "--port=3308",
-            "--user=venus_app",
-            "--password=venus_password",
-            "--database=venus_crm",
+            MYSQL_BIN,
+            "--host=" + DB_HOST,
+            "--port=" + DB_PORT,
+            "--user=" + DB_USER,
+            "--password=" + DB_PASSWORD,
+            "--database=" + DB_NAME,
             "--batch",
             "--raw",
             "--skip-column-names",
@@ -1845,12 +1872,12 @@ public final class CrmServer {
 
     private static void runMysqlUpdate(String sql) throws Exception {
         ProcessBuilder builder = new ProcessBuilder(
-            "/opt/homebrew/bin/mysql",
-            "--host=127.0.0.1",
-            "--port=3308",
-            "--user=venus_app",
-            "--password=venus_password",
-            "--database=venus_crm",
+            MYSQL_BIN,
+            "--host=" + DB_HOST,
+            "--port=" + DB_PORT,
+            "--user=" + DB_USER,
+            "--password=" + DB_PASSWORD,
+            "--database=" + DB_NAME,
             "-e",
             sql
         );

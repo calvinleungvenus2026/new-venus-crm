@@ -9,7 +9,7 @@ services:
       MYSQL_USER: venus_app
       MYSQL_PASSWORD: venus_password
     ports:
-      - "3308:3306"
+      - "3309:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./backend-java/src/main/resources/db:/docker-entrypoint-initdb.d:ro

@@ -152,7 +152,7 @@ export class AppComponent {
   private readonly storageKey = 'venus-crm-angular-auth';
   private readonly resetMarkerKey = 'venus-crm-data-reset-v1';
   private readonly pageSize = 15;
-  private readonly apiBaseUrl = 'http://localhost:8080';
+  private readonly apiBaseUrl = '';
 
   email = signal('admin-crm@venuslondontechnology.co.uk');
   password = signal('testtest123');

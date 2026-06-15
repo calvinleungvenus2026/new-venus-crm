@@ -23,7 +23,7 @@ cd backend-java
 ./run.sh
 ```
 
-Java backend runs on `http://localhost:8080`.
+Java backend runs on `http://localhost:8080` by default, but production should use a private port such as `127.0.0.1:8082`.
 
 ## Database
 
@@ -31,7 +31,7 @@ Java backend runs on `http://localhost:8080`.
 docker compose up -d mysql
 ```
 
-MySQL listens on `127.0.0.1:3306`.
+MySQL container exposes host port `3309` by default in this repo.
 
 ## Current state
 

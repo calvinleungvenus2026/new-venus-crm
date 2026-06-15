@@ -1,0 +1,16 @@
+[Unit]
+Description=Venus CRM Java Backend
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=CHANGE_ME_USER
+WorkingDirectory=CHANGE_ME_APP_ROOT/backend-java
+EnvironmentFile=CHANGE_ME_APP_ROOT/deploy/production.env
+ExecStart=CHANGE_ME_APP_ROOT/backend-java/run.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
