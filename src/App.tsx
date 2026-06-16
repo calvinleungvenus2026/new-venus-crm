@@ -35,7 +35,10 @@ const companies: Company[] = [
   { id: 'ripple-mic', name: 'Ripple MIC Limited', shortName: 'RM', color: '#ef4444' },
   { id: 'luminarytech', name: 'Luminarytech Limited', shortName: 'LT', color: '#0ea5e9' },
   { id: 'banyan-digital', name: 'Banyan Digital Limited', shortName: 'BD', color: '#22c55e' },
-  { id: 'momentum-growth', name: 'Momentum Growth Agency Limited', shortName: 'MG', color: '#f59e0b' }
+  { id: 'momentum-growth', name: 'Momentum Growth Agency Limited', shortName: 'MG', color: '#f59e0b' },
+  { id: 'biocheck', name: 'Biocheck Health Limited', shortName: 'BH', color: '#10b981' },
+  { id: 'crestpoint-hr', name: 'CrestpointHR', shortName: 'CH', color: '#6366f1' },
+  { id: 'novasoft-tech', name: 'NovaSoftTech', shortName: 'NS', color: '#06b6d4' }
 ];
 
 const DEFAULT_PASSWORD = 'testtest123';
@@ -96,6 +99,27 @@ const accounts: Account[] = [
     name: 'Momentum Growth Agency Admin',
     role: 'COMPANY_ADMIN',
     companyIds: ['momentum-growth']
+  },
+  {
+    email: 'admin-crm@biocheckhealth.co.uk',
+    password: DEFAULT_PASSWORD,
+    name: 'Biocheck Health Admin',
+    role: 'COMPANY_ADMIN',
+    companyIds: ['biocheck']
+  },
+  {
+    email: 'admin-crm@crestpointhr.co.uk',
+    password: DEFAULT_PASSWORD,
+    name: 'CrestpointHR Admin',
+    role: 'COMPANY_ADMIN',
+    companyIds: ['crestpoint-hr']
+  },
+  {
+    email: 'admin-crm@novasoft-technologies.co.uk',
+    password: DEFAULT_PASSWORD,
+    name: 'NovaSoftTech Admin',
+    role: 'COMPANY_ADMIN',
+    companyIds: ['novasoft-tech']
   },
   {
     email: 'admin-crm@universal.com',

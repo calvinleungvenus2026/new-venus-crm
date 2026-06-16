@@ -77,31 +77,168 @@
         </div>
         @if (currentSection() === 'projects') {
           <div class="toolbar-actions">
-            <button class="secondary-button sync-button" [disabled]="syncingProjects()" (click)="syncProjects()">
-              {{ syncingProjects() ? '同步中...' : 'Sync' }}
-            </button>
-            <button class="primary-button" (click)="openAddModal()">新增项目</button>
-            <input
-              class="toolbar-search"
-              [ngModel]="searchTerm()"
-              (ngModelChange)="onSearchChange($event)"
-              name="search"
-              type="text"
-              placeholder="搜索所有列"
-            >
-            <select [ngModel]="statusFilter()" (ngModelChange)="onStatusChange($event)" name="status">
-              <option value="筛选">筛选</option>
-              <option value="进行中">进行中</option>
-              <option value="待开始">待开始</option>
-              <option value="已完成">已完成</option>
-              <option value="日期从新到旧">日期从新到旧</option>
-              <option value="日期从旧到新">日期从旧到新</option>
-              <option value="金额从高到低">金额从高到低</option>
-              <option value="金额从低到高">金额从低到高</option>
-            </select>
+            <div class="toolbar-command-bar toolbar-command-bar-unified">
+              <div class="command-search-slot" [class.command-search-slot-expanded]="showProjectSearch()">
+                <button
+                  class="command-button command-button-icon command-search-trigger"
+                  [class.command-button-active]="showProjectSearch()"
+                  (click)="toggleProjectSearch()"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <circle cx="11" cy="11" r="6.5"></circle>
+                    <path d="M16 16L21 21"></path>
+                  </svg>
+                </button>
+                @if (showProjectSearch()) {
+                  <input
+                    class="command-search-input"
+                    [ngModel]="searchTerm()"
+                    (ngModelChange)="onSearchChange($event)"
+                    name="search"
+                    type="text"
+                    placeholder="搜索所有列"
+                  >
+                }
+              </div>
+              <button class="command-button" [disabled]="syncingProjects()" (click)="syncProjects()">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M20 12A8 8 0 1 1 17.2 6"></path>
+                  <path d="M20 4V10H14"></path>
+                </svg>
+                <span>{{ syncingProjects() ? '同步中...' : '同步' }}</span>
+              </button>
+              <button
+                class="command-button"
+                (click)="openAddModal()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 5V19"></path>
+                  <path d="M5 12H19"></path>
+                </svg>
+                <span>新增项目</span>
+              </button>
+              <div class="command-filter-slot">
+                <button
+                  class="command-button"
+                  [class.command-button-active]="showProjectFilter()"
+                  (click)="toggleProjectFilter()"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 6H20L14 12V19L10 17V12L4 6Z"></path>
+                  </svg>
+                  <span>{{ statusFilter() === '筛选' ? '筛选' : statusFilter() }}</span>
+                </button>
+                @if (showProjectFilter()) {
+                  <div class="command-filter-menu">
+                    @for (option of projectFilterOptions; track option) {
+                      <button
+                        class="command-filter-option"
+                        [class.command-filter-option-active]="statusFilter() === option"
+                        (click)="onStatusChange(option)"
+                      >
+                        <span class="command-filter-check">{{ statusFilter() === option ? '✓' : '' }}</span>
+                        <span>{{ option }}</span>
+                      </button>
+                    }
+                  </div>
+                }
+              </div>
+              <button
+                class="command-button"
+                [class.command-button-active]="projectViewMode() === 'grid'"
+                (click)="toggleProjectGridView()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="4" y="4" width="7" height="7"></rect>
+                  <rect x="13" y="4" width="7" height="7"></rect>
+                  <rect x="4" y="13" width="7" height="7"></rect>
+                  <rect x="13" y="13" width="7" height="7"></rect>
+                </svg>
+                <span>网格</span>
+              </button>
+              <button
+                class="command-button"
+                [class.command-button-active]="showFormatToolbar() && projectViewMode() === 'table'"
+                (click)="toggleProjectFormat()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 14L10 8L16 14L10 20L4 14Z"></path>
+                  <path d="M10 8L14 4L20 10L16 14"></path>
+                  <path d="M4 20H20"></path>
+                </svg>
+                <span>格式</span>
+              </button>
+            </div>
           </div>
         }
       </header>
+
+      @if (currentSection() === 'projects' && projectViewMode() === 'table' && showFormatToolbar()) {
+        <section class="format-toolbar">
+          <div class="format-toolbar-group">
+            <span class="format-toolbar-label">{{ selectedCellLabel() }}</span>
+            <button class="secondary-button" (click)="clearSelectedCellFormat()">清除格式</button>
+          </div>
+          <div class="format-toolbar-group">
+            <select [ngModel]="selectedCellFormat()?.fontFamily || 'Arial'" (ngModelChange)="setSelectedCellFontFamily($event)">
+              @for (font of fontFamilies; track font) {
+                <option [value]="font">{{ font }}</option>
+              }
+            </select>
+            <button class="icon-button" (click)="adjustSelectedCellFontSize(-1)">-</button>
+            <input class="font-size-input" type="number" [ngModel]="selectedCellFormat()?.fontSize || 13" (ngModelChange)="setSelectedCellFontSize($event ? +$event : 13)">
+            <button class="icon-button" (click)="adjustSelectedCellFontSize(1)">+</button>
+          </div>
+          <div class="format-toolbar-group">
+            <button class="icon-button" [class.active]="selectedCellFormat()?.bold" (click)="toggleSelectedCellMark('bold')"><strong>B</strong></button>
+            <button class="icon-button" [class.active]="selectedCellFormat()?.italic" (click)="toggleSelectedCellMark('italic')"><em>I</em></button>
+            <button class="icon-button" [class.active]="selectedCellFormat()?.underline" (click)="toggleSelectedCellMark('underline')"><u>U</u></button>
+            <button class="icon-button" [class.active]="selectedCellFormat()?.strikethrough" (click)="toggleSelectedCellMark('strikethrough')"><s>S</s></button>
+          </div>
+          <div class="format-toolbar-group">
+            <label class="color-input">
+              A
+              <input type="color" [ngModel]="selectedCellFormat()?.textColor || '#172033'" (ngModelChange)="setSelectedCellTextColor($event)">
+            </label>
+            <label class="color-input">
+              Fill
+              <input type="color" [ngModel]="selectedCellFormat()?.backgroundColor || '#ffffff'" (ngModelChange)="setSelectedCellBackgroundColor($event)">
+            </label>
+          </div>
+          <div class="format-toolbar-group">
+            <button
+              class="icon-button align-button"
+              [class.active]="selectedCellFormat()?.textAlign === 'left'"
+              (click)="setSelectedCellTextAlign('left')"
+              aria-label="Align left"
+            >
+              <span class="align-icon align-left">
+                <span></span><span></span><span></span><span></span>
+              </span>
+            </button>
+            <button
+              class="icon-button align-button"
+              [class.active]="selectedCellFormat()?.textAlign === 'center'"
+              (click)="setSelectedCellTextAlign('center')"
+              aria-label="Align center"
+            >
+              <span class="align-icon align-center">
+                <span></span><span></span><span></span><span></span>
+              </span>
+            </button>
+            <button
+              class="icon-button align-button"
+              [class.active]="selectedCellFormat()?.textAlign === 'right'"
+              (click)="setSelectedCellTextAlign('right')"
+              aria-label="Align right"
+            >
+              <span class="align-icon align-right">
+                <span></span><span></span><span></span><span></span>
+              </span>
+            </button>
+          </div>
+        </section>
+      }
 
       @if (currentSection() === 'dashboard') {
         <section class="dashboard-panel">
@@ -256,61 +393,224 @@
         @if (projectsLoading()) {
           <div class="projects-banner">正在读取数据库项目数据...</div>
         }
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th class="col-client">客户公司</th>
-                <th class="col-quo">QUO 编号</th>
-                <th class="col-status">QUO 状态</th>
-                <th class="col-msa">MSA 编号</th>
-                <th class="col-status">MSA 状态</th>
-                <th class="col-date">日期</th>
-                <th class="col-amount">金额 (GBP)</th>
-                <th class="col-invoice">关联发票</th>
-                <th class="col-deliverables">交付内容</th>
-                <th class="col-status">one-off/ Phase-based</th>
-                <th class="col-date">开始日期</th>
-                <th class="col-date">交付日期</th>
-                <th class="col-status">one-off 完成状态</th>
-                <th class="col-status">Phase 1 完成状态</th>
-                <th class="col-status">Phase 2 完成状态</th>
-                <th class="col-status">Phase 3 完成状态</th>
-                <th class="col-client">跟进人（MSA签署人）</th>
-                <th class="col-actions">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (row of paginatedProjects(); track row.id) {
+        @if (projectViewMode() === 'grid') {
+          <section class="projects-grid-view">
+            @for (row of paginatedProjects(); track row.id) {
+              <article class="project-grid-card">
+                <div class="project-grid-card-head">
+                  <div>
+                    <p class="project-grid-label">客户公司</p>
+                    <h3>{{ row.clientCompany || '未填写' }}</h3>
+                  </div>
+                  <span class="chip">{{ row.engagementType || '未填写' }}</span>
+                </div>
+                <div class="project-grid-card-body">
+                  <div class="project-grid-item">
+                    <span>QUO 编号</span>
+                    <strong>{{ row.quoNumber || '未填写' }}</strong>
+                  </div>
+                  <div class="project-grid-item">
+                    <span>MSA 编号</span>
+                    <strong>{{ row.msaNumber || '未填写' }}</strong>
+                  </div>
+                  <div class="project-grid-item">
+                    <span>日期</span>
+                    <strong>{{ row.date || '未填写' }}</strong>
+                  </div>
+                  <div class="project-grid-item">
+                    <span>金额 (GBP)</span>
+                    <strong>{{ row.amountGbp || '未填写' }}</strong>
+                  </div>
+                  <div class="project-grid-item">
+                    <span>MSA 状态</span>
+                    <strong>{{ row.msaStatus || '未填写' }}</strong>
+                  </div>
+                  <div class="project-grid-item project-grid-item-wide">
+                    <span>交付内容</span>
+                    <strong>{{ row.deliverables || '未填写' }}</strong>
+                  </div>
+                </div>
+                <div class="project-grid-card-foot">
+                  @if (hasPhaseStatus(row)) {
+                    <button class="phase-summary-button" (click)="openPhaseStatusModal(row)">
+                      {{ phaseStatusButtonLabel(row) }}
+                    </button>
+                  }
+                  <div class="action-buttons">
+                    <button class="table-action-button" (click)="openEditModal(row)">编辑</button>
+                    <button class="table-action-button delete-button" (click)="deleteProject(row.id)">删除</button>
+                  </div>
+                </div>
+              </article>
+            }
+          </section>
+        } @else {
+          <div class="table-wrap">
+            <table>
+              <thead>
                 <tr>
-                  <td>{{ row.clientCompany }}</td>
-                  <td>{{ row.quoNumber }}</td>
-                  <td><span class="chip">{{ row.quoStatus }}</span></td>
-                  <td>{{ row.msaNumber }}</td>
-                  <td><span class="chip">{{ row.msaStatus }}</span></td>
-                  <td>{{ row.date }}</td>
-                  <td>{{ row.amountGbp }}</td>
-                  <td>{{ row.relatedInvoice }}</td>
-                  <td class="cell-deliverables" [title]="row.deliverables">{{ row.deliverables }}</td>
-                  <td><span class="chip">{{ row.engagementType || '未填写' }}</span></td>
-                  <td>{{ row.startDate }}</td>
-                  <td>{{ row.deliveryDate }}</td>
-                  <td><span class="chip chip-priority">{{ row.completionStatus }}</span></td>
-                  <td><span class="chip chip-priority">{{ row.phase1Status || '未填写' }}</span></td>
-                  <td><span class="chip chip-priority">{{ row.phase2Status || '未填写' }}</span></td>
-                  <td><span class="chip chip-priority">{{ row.phase3Status || '未填写' }}</span></td>
-                  <td>{{ row.msaSigner || '未填写' }}</td>
-                  <td class="cell-actions">
-                    <div class="action-buttons">
-                      <button class="table-action-button" (click)="openEditModal(row)">编辑</button>
-                      <button class="table-action-button delete-button" (click)="deleteProject(row.id)">删除</button>
-                    </div>
-                  </td>
+                  <th class="col-client">客户公司</th>
+                  <th class="col-quo">QUO 编号</th>
+                  <th class="col-status">QUO 状态</th>
+                  <th class="col-msa">MSA 编号</th>
+                  <th class="col-status">MSA 状态</th>
+                  <th class="col-date">日期</th>
+                  <th class="col-amount">金额 (GBP)</th>
+                  <th class="col-invoice">关联发票</th>
+                  <th class="col-deliverables">交付内容</th>
+                  <th class="col-status">one-off/ Phase-based</th>
+                  <th class="col-date">开始日期</th>
+                  <th class="col-date">交付日期</th>
+                  <th class="col-status">one-off 完成状态</th>
+                  <th class="col-phase-summary">Phase-based 完成状态</th>
+                  <th class="col-client">跟进人（MSA签署人）</th>
+                  <th class="col-client">备注</th>
+                  <th class="col-actions">操作</th>
                 </tr>
-              }
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                @for (row of paginatedProjects(); track row.id) {
+                  <tr>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'clientCompany')" [ngStyle]="cellDisplayStyle(row, 'clientCompany')" (click)="selectCell(row, 'clientCompany'); startInlineEdit(row, 'clientCompany')">
+                      @if (isEditingCell(row.id, 'clientCompany')) {
+                        <input class="inline-edit-input" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'clientCompany')" (keydown.enter)="saveInlineEdit(row, 'clientCompany')" (keydown.escape)="cancelInlineEdit()" autofocus>
+                      } @else {
+                        {{ formattedCellValue(row, 'clientCompany') }}
+                      }
+                    </td>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'quoNumber')" [ngStyle]="cellDisplayStyle(row, 'quoNumber')" (click)="selectCell(row, 'quoNumber'); startInlineEdit(row, 'quoNumber')">
+                      @if (isEditingCell(row.id, 'quoNumber')) {
+                        <input class="inline-edit-input" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'quoNumber')" (keydown.enter)="saveInlineEdit(row, 'quoNumber')" (keydown.escape)="cancelInlineEdit()" autofocus>
+                      } @else {
+                        {{ formattedCellValue(row, 'quoNumber') }}
+                      }
+                    </td>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'quoStatus')" [ngStyle]="cellDisplayStyle(row, 'quoStatus')" (click)="selectCell(row, 'quoStatus'); startInlineEdit(row, 'quoStatus')">
+                      @if (isEditingCell(row.id, 'quoStatus')) {
+                        <select class="inline-edit-select" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'quoStatus')">
+                          @for (option of inlineSelectOptions('quoStatus'); track option) {
+                            <option [value]="option">{{ option }}</option>
+                          }
+                        </select>
+                      } @else {
+                        <span class="chip">{{ row.quoStatus }}</span>
+                      }
+                    </td>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'msaNumber')" [ngStyle]="cellDisplayStyle(row, 'msaNumber')" (click)="selectCell(row, 'msaNumber'); startInlineEdit(row, 'msaNumber')">
+                      @if (isEditingCell(row.id, 'msaNumber')) {
+                        <input class="inline-edit-input" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'msaNumber')" (keydown.enter)="saveInlineEdit(row, 'msaNumber')" (keydown.escape)="cancelInlineEdit()" autofocus>
+                      } @else {
+                        {{ formattedCellValue(row, 'msaNumber') }}
+                      }
+                    </td>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'msaStatus')" [ngStyle]="cellDisplayStyle(row, 'msaStatus')" (click)="selectCell(row, 'msaStatus'); startInlineEdit(row, 'msaStatus')">
+                      @if (isEditingCell(row.id, 'msaStatus')) {
+                        <select class="inline-edit-select" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'msaStatus')">
+                          @for (option of inlineSelectOptions('msaStatus'); track option) {
+                            <option [value]="option">{{ option }}</option>
+                          }
+                        </select>
+                      } @else {
+                        <span class="chip">{{ row.msaStatus }}</span>
+                      }
+                    </td>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'date')" [ngStyle]="cellDisplayStyle(row, 'date')" (click)="selectCell(row, 'date'); startInlineEdit(row, 'date')">
+                      @if (isEditingCell(row.id, 'date')) {
+                        <input class="inline-edit-input" [type]="inlineFieldInputType('date')" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'date')" (keydown.enter)="saveInlineEdit(row, 'date')" (keydown.escape)="cancelInlineEdit()" autofocus>
+                      } @else {
+                        {{ formattedCellValue(row, 'date') }}
+                      }
+                    </td>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'amountGbp')" [ngStyle]="cellDisplayStyle(row, 'amountGbp')" (click)="selectCell(row, 'amountGbp'); startInlineEdit(row, 'amountGbp')">
+                      @if (isEditingCell(row.id, 'amountGbp')) {
+                        <input class="inline-edit-input" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'amountGbp')" (keydown.enter)="saveInlineEdit(row, 'amountGbp')" (keydown.escape)="cancelInlineEdit()" autofocus>
+                      } @else {
+                        {{ formattedCellValue(row, 'amountGbp') }}
+                      }
+                    </td>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'relatedInvoice')" [ngStyle]="cellDisplayStyle(row, 'relatedInvoice')" (click)="selectCell(row, 'relatedInvoice'); startInlineEdit(row, 'relatedInvoice')">
+                      @if (isEditingCell(row.id, 'relatedInvoice')) {
+                        <input class="inline-edit-input" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'relatedInvoice')" (keydown.enter)="saveInlineEdit(row, 'relatedInvoice')" (keydown.escape)="cancelInlineEdit()" autofocus>
+                      } @else {
+                        {{ formattedCellValue(row, 'relatedInvoice') }}
+                      }
+                    </td>
+                    <td class="cell-deliverables editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'deliverables')" [ngStyle]="cellDisplayStyle(row, 'deliverables')" [title]="row.deliverables" (click)="selectCell(row, 'deliverables'); startInlineEdit(row, 'deliverables')">
+                      @if (isEditingCell(row.id, 'deliverables')) {
+                        <input class="inline-edit-input" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'deliverables')" (keydown.enter)="saveInlineEdit(row, 'deliverables')" (keydown.escape)="cancelInlineEdit()" autofocus>
+                      } @else {
+                        {{ formattedCellValue(row, 'deliverables') }}
+                      }
+                    </td>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'engagementType')" [ngStyle]="cellDisplayStyle(row, 'engagementType')" (click)="selectCell(row, 'engagementType'); startInlineEdit(row, 'engagementType')">
+                      @if (isEditingCell(row.id, 'engagementType')) {
+                        <select class="inline-edit-select" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'engagementType')">
+                          @for (option of inlineSelectOptions('engagementType'); track option) {
+                            <option [value]="option">{{ option }}</option>
+                          }
+                        </select>
+                      } @else {
+                        <span class="chip">{{ row.engagementType || '未填写' }}</span>
+                      }
+                    </td>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'startDate')" [ngStyle]="cellDisplayStyle(row, 'startDate')" (click)="selectCell(row, 'startDate'); startInlineEdit(row, 'startDate')">
+                      @if (isEditingCell(row.id, 'startDate')) {
+                        <input class="inline-edit-input" [type]="inlineFieldInputType('startDate')" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'startDate')" (keydown.enter)="saveInlineEdit(row, 'startDate')" (keydown.escape)="cancelInlineEdit()" autofocus>
+                      } @else {
+                        {{ formattedCellValue(row, 'startDate') }}
+                      }
+                    </td>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'deliveryDate')" [ngStyle]="cellDisplayStyle(row, 'deliveryDate')" (click)="selectCell(row, 'deliveryDate'); startInlineEdit(row, 'deliveryDate')">
+                      @if (isEditingCell(row.id, 'deliveryDate')) {
+                        <input class="inline-edit-input" [type]="inlineFieldInputType('deliveryDate')" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'deliveryDate')" (keydown.enter)="saveInlineEdit(row, 'deliveryDate')" (keydown.escape)="cancelInlineEdit()" autofocus>
+                      } @else {
+                        {{ formattedCellValue(row, 'deliveryDate') }}
+                      }
+                    </td>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'completionStatus')" [ngStyle]="cellDisplayStyle(row, 'completionStatus')" (click)="selectCell(row, 'completionStatus'); startInlineEdit(row, 'completionStatus')">
+                      @if (isEditingCell(row.id, 'completionStatus')) {
+                        <select class="inline-edit-select" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'completionStatus')">
+                          @for (option of inlineSelectOptions('completionStatus'); track option) {
+                            <option [value]="option">{{ option }}</option>
+                          }
+                        </select>
+                      } @else if (row.completionStatus) {
+                        <span class="chip chip-priority">{{ row.completionStatus }}</span>
+                      }
+                    </td>
+                    <td>
+                      @if (hasPhaseStatus(row)) {
+                        <button class="phase-summary-button" (click)="openPhaseStatusModal(row)">
+                          {{ phaseStatusButtonLabel(row) }}
+                        </button>
+                      }
+                    </td>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'msaSigner')" [ngStyle]="cellDisplayStyle(row, 'msaSigner')" (click)="selectCell(row, 'msaSigner'); startInlineEdit(row, 'msaSigner')">
+                      @if (isEditingCell(row.id, 'msaSigner')) {
+                        <input class="inline-edit-input" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'msaSigner')" (keydown.enter)="saveInlineEdit(row, 'msaSigner')" (keydown.escape)="cancelInlineEdit()" autofocus>
+                      } @else {
+                        {{ formattedCellValue(row, 'msaSigner') }}
+                      }
+                    </td>
+                    <td class="editable-cell" [class.selected-grid-cell]="isSelectedCell(row.id, 'note')" [ngStyle]="cellDisplayStyle(row, 'note')" (click)="selectCell(row, 'note'); startInlineEdit(row, 'note')">
+                      @if (isEditingCell(row.id, 'note')) {
+                        <input class="inline-edit-input" [ngModel]="editingValue()" (ngModelChange)="updateInlineEditValue($event)" (blur)="saveInlineEdit(row, 'note')" (keydown.enter)="saveInlineEdit(row, 'note')" (keydown.escape)="cancelInlineEdit()" autofocus>
+                      } @else {
+                        {{ formattedCellValue(row, 'note') }}
+                      }
+                    </td>
+                    <td class="cell-actions">
+                      <div class="action-buttons">
+                        <button class="table-action-button" (click)="openEditModal(row)">编辑</button>
+                        <button class="table-action-button delete-button" (click)="deleteProject(row.id)">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
         <div class="pagination-bar">
           <span class="pagination-summary">共 {{ filteredProjects().length }} 条，每页 15 条</span>
           <div class="pagination-actions">
@@ -479,6 +779,11 @@
               </label>
 
               <label class="full-width">
+                <span>备注</span>
+                <textarea [(ngModel)]="newProject.note" name="newProjectNote" rows="3" placeholder="补充说明、备注信息"></textarea>
+              </label>
+
+              <label class="full-width">
                 <span>交付内容</span>
                 <textarea [(ngModel)]="newProject.deliverables" name="newProjectDeliverables" rows="4" placeholder="输入交付内容"></textarea>
               </label>
@@ -492,6 +797,37 @@
               <button class="secondary-button" (click)="closeAddModal()">取消</button>
               <button class="primary-button" (click)="addProject()">保存项目</button>
             </div>
+          </section>
+        </div>
+      }
+
+      @if (selectedPhaseProject(); as project) {
+        <div class="modal-backdrop" (click)="closePhaseStatusModal()">
+          <section class="modal-card phase-status-modal" (click)="$event.stopPropagation()">
+            <div class="modal-header">
+              <div>
+                <h2>Phase-based 完成状态</h2>
+                <p>{{ project.clientCompany || '未命名项目' }}</p>
+              </div>
+              <button class="icon-close" (click)="closePhaseStatusModal()">关闭</button>
+            </div>
+
+            @if (phaseStatusItems(project).length > 0) {
+              <div class="phase-status-table">
+                <div class="phase-status-row phase-status-head">
+                  <span>阶段</span>
+                  <span>状态</span>
+                </div>
+                @for (item of phaseStatusItems(project); track item.label) {
+                  <div class="phase-status-row">
+                    <span>{{ item.label }}</span>
+                    <span><span class="chip chip-priority">{{ item.value }}</span></span>
+                  </div>
+                }
+              </div>
+            } @else {
+              <div class="projects-banner">这个项目当前没有可显示的 Phase 状态。</div>
+            }
           </section>
         </div>
       }

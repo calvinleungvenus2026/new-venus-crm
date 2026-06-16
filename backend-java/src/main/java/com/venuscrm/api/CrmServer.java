@@ -69,6 +69,19 @@ public final class CrmServer {
     private static final int PASSWORD_ITERATIONS = 65_536;
     private static final int PASSWORD_KEY_LENGTH = 256;
     private static final String DEFAULT_PASSWORD = "testtest123";
+    private static final List<Company> SEED_COMPANIES = List.of(
+        new Company("venus", "Venus London Technology Limited", "VL", "#4e8ef7"),
+        new Company("trinity-property", "Trinity Property Consultancy Limited", "TP", "#14b8a6"),
+        new Company("trinity-concierge", "Trinity London Concierge Limited", "TC", "#f97316"),
+        new Company("ripplesoft", "Ripplesoft Limited", "RS", "#8b5cf6"),
+        new Company("ripple-mic", "Ripple MIC Limited", "RM", "#ef4444"),
+        new Company("luminarytech", "Luminarytech Limited", "LT", "#0ea5e9"),
+        new Company("banyan-digital", "Banyan Digital Limited", "BD", "#22c55e"),
+        new Company("momentum-growth", "Momentum Growth Agency Limited", "MG", "#f59e0b"),
+        new Company("biocheck", "Biocheck Health Limited", "BH", "#10b981"),
+        new Company("crestpoint-hr", "CrestpointHR", "CH", "#6366f1"),
+        new Company("novasoft-tech", "NovaSoftTech", "NS", "#06b6d4")
+    );
     private static final Map<String, String> LEGACY_SEED_EMAIL_MIGRATIONS = Map.of(
         "admin-crm@ripplesoft.co.uk", "admin-crm@ripplesoftlimited.co.uk",
         "admin-crm@ripplemic.co.uk", "admin-crm@ripplemiclimited.co.uk",
@@ -83,8 +96,12 @@ public final class CrmServer {
         new SeedAccount("admin-crm@luminarytech.co.uk", DEFAULT_PASSWORD, "Luminarytech Admin", "COMPANY_ADMIN", List.of("luminarytech")),
         new SeedAccount("admin-crm@banyandigitallimited.co.uk", DEFAULT_PASSWORD, "Banyan Digital Admin", "COMPANY_ADMIN", List.of("banyan-digital")),
         new SeedAccount("admin-crm@momentumgrowthagency.co.uk", DEFAULT_PASSWORD, "Momentum Growth Agency Admin", "COMPANY_ADMIN", List.of("momentum-growth")),
+        new SeedAccount("admin-crm@biocheckhealth.co.uk", DEFAULT_PASSWORD, "Biocheck Health Admin", "COMPANY_ADMIN", List.of("biocheck")),
+        new SeedAccount("admin-crm@crestpointhr.co.uk", DEFAULT_PASSWORD, "CrestpointHR Admin", "COMPANY_ADMIN", List.of("crestpoint-hr")),
+        new SeedAccount("admin-crm@novasoft-technologies.co.uk", DEFAULT_PASSWORD, "NovaSoftTech Admin", "COMPANY_ADMIN", List.of("novasoft-tech")),
         new SeedAccount("admin-crm@universal.com", DEFAULT_PASSWORD, "Universal CRM Admin", "SUPER_ADMIN", List.of(
-            "venus", "trinity-property", "trinity-concierge", "ripplesoft", "ripple-mic", "luminarytech", "banyan-digital", "momentum-growth"
+            "venus", "trinity-property", "trinity-concierge", "ripplesoft", "ripple-mic", "luminarytech", "banyan-digital", "momentum-growth",
+            "biocheck", "crestpoint-hr", "novasoft-tech"
         ))
     );
 
@@ -289,11 +306,20 @@ public final class CrmServer {
                 AuthenticatedSession auth = requireSession(exchange);
                 ensureCompanyAccess(auth, companyId);
                 AppConfig config = AppConfig.load();
+                String driveWorkbookFileId = config.driveWorkbookFileIdForCompany(companyId);
                 String driveWorkbookFileName = config.driveWorkbookFileNameForCompany(companyId);
+                String folderId = config.folderIdForCompany(companyId);
+                if (driveWorkbookFileId != null && !driveWorkbookFileId.isBlank()) {
+                    ServiceAccountCredentials credentials = ServiceAccountCredentials.fromFile(config.serviceAccountJsonPath());
+                    String accessToken = requestDriveAccessToken(credentials);
+                    DriveEntry workbookEntry = fetchDriveFileById(accessToken, driveWorkbookFileId);
+                    respondJson(exchange, 200, driveWorkbookListingJson(companyId, workbookEntry));
+                    return;
+                }
                 if (driveWorkbookFileName != null && !driveWorkbookFileName.isBlank()) {
                     ServiceAccountCredentials credentials = ServiceAccountCredentials.fromFile(config.serviceAccountJsonPath());
                     String accessToken = requestDriveAccessToken(credentials);
-                    DriveEntry workbookEntry = fetchDriveFileByExactName(accessToken, driveWorkbookFileName);
+                    DriveEntry workbookEntry = fetchDriveFileByName(accessToken, driveWorkbookFileName, folderId);
                     respondJson(exchange, 200, driveWorkbookListingJson(companyId, workbookEntry));
                     return;
                 }
@@ -302,7 +328,6 @@ public final class CrmServer {
                     respondJson(exchange, 200, workbookListingJson(workbookPath, companyId));
                     return;
                 }
-                String folderId = config.folderIdForCompany(companyId);
 
                 if (folderId == null || folderId.isBlank()) {
                     respondJson(exchange, 404, "{\"error\":\"No Google Drive folder configured for companyId: " + escape(companyId) + "\"}");
@@ -348,11 +373,20 @@ public final class CrmServer {
                 AuthenticatedSession auth = requireSession(exchange);
                 ensureCompanyAccess(auth, companyId);
                 AppConfig config = AppConfig.load();
+                String driveWorkbookFileId = config.driveWorkbookFileIdForCompany(companyId);
                 String driveWorkbookFileName = config.driveWorkbookFileNameForCompany(companyId);
+                String folderId = config.folderIdForCompany(companyId);
+                if (driveWorkbookFileId != null && !driveWorkbookFileId.isBlank()) {
+                    ServiceAccountCredentials credentials = ServiceAccountCredentials.fromFile(config.serviceAccountJsonPath());
+                    String accessToken = requestDriveAccessToken(credentials);
+                    List<ProjectRowRecord> rows = buildProjectRowsFromDriveFileId(accessToken, driveWorkbookFileId, companyId);
+                    respondJson(exchange, 200, projectRowRecordsToJson(rows));
+                    return;
+                }
                 if (driveWorkbookFileName != null && !driveWorkbookFileName.isBlank()) {
                     ServiceAccountCredentials credentials = ServiceAccountCredentials.fromFile(config.serviceAccountJsonPath());
                     String accessToken = requestDriveAccessToken(credentials);
-                    List<ProjectRowRecord> rows = buildProjectRowsFromDriveWorkbook(accessToken, driveWorkbookFileName, companyId);
+                    List<ProjectRowRecord> rows = buildProjectRowsFromDriveWorkbook(accessToken, driveWorkbookFileName, companyId, folderId);
                     respondJson(exchange, 200, projectRowRecordsToJson(rows));
                     return;
                 }
@@ -362,7 +396,6 @@ public final class CrmServer {
                     respondJson(exchange, 200, projectRowRecordsToJson(rows));
                     return;
                 }
-                String folderId = config.folderIdForCompany(companyId);
                 if (folderId == null || folderId.isBlank()) {
                     respondJson(exchange, 404, "{\"error\":\"No Google Drive folder configured for companyId: " + escape(companyId) + "\"}");
                     return;
@@ -440,17 +473,22 @@ public final class CrmServer {
                 ensureCompanyAccess(auth, companyId);
                 AppConfig config = AppConfig.load();
                 List<ProjectRowRecord> rows;
+                String driveWorkbookFileId = config.driveWorkbookFileIdForCompany(companyId);
                 String driveWorkbookFileName = config.driveWorkbookFileNameForCompany(companyId);
-                if (driveWorkbookFileName != null && !driveWorkbookFileName.isBlank()) {
+                String folderId = config.folderIdForCompany(companyId);
+                if (driveWorkbookFileId != null && !driveWorkbookFileId.isBlank()) {
                     ServiceAccountCredentials credentials = ServiceAccountCredentials.fromFile(config.serviceAccountJsonPath());
                     String accessToken = requestDriveAccessToken(credentials);
-                    rows = buildProjectRowsFromDriveWorkbook(accessToken, driveWorkbookFileName, companyId);
+                    rows = buildProjectRowsFromDriveFileId(accessToken, driveWorkbookFileId, companyId);
+                } else if (driveWorkbookFileName != null && !driveWorkbookFileName.isBlank()) {
+                    ServiceAccountCredentials credentials = ServiceAccountCredentials.fromFile(config.serviceAccountJsonPath());
+                    String accessToken = requestDriveAccessToken(credentials);
+                    rows = buildProjectRowsFromDriveWorkbook(accessToken, driveWorkbookFileName, companyId, folderId);
                 } else {
                     String workbookPath = config.workbookPathForCompany(companyId);
                     if (workbookPath != null && !workbookPath.isBlank()) {
                         rows = buildProjectRowsFromWorkbook(Path.of(workbookPath), companyId);
                     } else {
-                        String folderId = config.folderIdForCompany(companyId);
                         if (folderId == null || folderId.isBlank()) {
                             respondJson(exchange, 404, "{\"error\":\"No Google Drive folder configured for companyId: " + escape(companyId) + "\"}");
                             return;
@@ -660,8 +698,18 @@ public final class CrmServer {
         return List.of();
     }
 
-    private static List<ProjectRowRecord> buildProjectRowsFromDriveWorkbook(String accessToken, String fileName, String companyId) throws Exception {
-        DriveEntry workbookEntry = fetchDriveFileByExactName(accessToken, fileName);
+    private static List<ProjectRowRecord> buildProjectRowsFromDriveWorkbook(String accessToken, String fileName, String companyId, String folderId) throws Exception {
+        DriveEntry workbookEntry = fetchDriveFileByName(accessToken, fileName, folderId);
+        Path tempWorkbook = downloadDriveFileToTemp(accessToken, workbookEntry);
+        try {
+            return buildProjectRowsFromWorkbook(tempWorkbook, companyId);
+        } finally {
+            Files.deleteIfExists(tempWorkbook);
+        }
+    }
+
+    private static List<ProjectRowRecord> buildProjectRowsFromDriveFileId(String accessToken, String fileId, String companyId) throws Exception {
+        DriveEntry workbookEntry = fetchDriveFileById(accessToken, fileId);
         Path tempWorkbook = downloadDriveFileToTemp(accessToken, workbookEntry);
         try {
             return buildProjectRowsFromWorkbook(tempWorkbook, companyId);
@@ -945,7 +993,9 @@ public final class CrmServer {
                 headerMapping.value(row, "phase2Status"),
                 headerMapping.value(row, "phase3Status"),
                 headerMapping.value(row, "msaSigner"),
-                headerMapping.value(row, "completionStatus")
+                headerMapping.value(row, "note"),
+                headerMapping.value(row, "completionStatus"),
+                ""
             );
 
             if (isBlankProjectRow(record)) {
@@ -1002,6 +1052,7 @@ public final class CrmServer {
         if (matchesHeader(normalized, "phase2Status", "phase2status", "phase2完成状态", "phase2状态", "第二阶段完成状态", "阶段2完成状态", "phase 2 完成状态")) return "phase2Status";
         if (matchesHeader(normalized, "phase3Status", "phase3status", "phase3完成状态", "phase3状态", "第三阶段完成状态", "阶段3完成状态", "phase 3 完成状态")) return "phase3Status";
         if (matchesHeader(normalized, "msaSigner", "msasigner", "followupowner", "跟进人（msa签署人）", "跟进人", "msa签署人")) return "msaSigner";
+        if (matchesHeader(normalized, "note", "notes", "remark", "remarks", "备注")) return "note";
         if (matchesHeader(normalized, "completionStatus", "completionstatus", "status", "完成状态", "进度")) return "completionStatus";
         return null;
     }
@@ -1035,6 +1086,9 @@ public final class CrmServer {
             case "luminarytech" -> aliases.add(normalizeHeader("LuminaryTech"));
             case "banyan-digital" -> aliases.add(normalizeHeader("BanyanDigital"));
             case "momentum-growth" -> aliases.add(normalizeHeader("MomentumGrowth"));
+            case "biocheck" -> aliases.add(normalizeHeader("Biocheck"));
+            case "crestpoint-hr" -> aliases.add(normalizeHeader("CrestpointHR"));
+            case "novasoft-tech" -> aliases.add(normalizeHeader("NovaSoftTech"));
             default -> {
             }
         }
@@ -1152,10 +1206,66 @@ public final class CrmServer {
         throw new IOException("Google Drive file not found: " + fileName);
     }
 
+    private static DriveEntry fetchDriveFileByName(String accessToken, String fileName, String folderId)
+        throws IOException, InterruptedException {
+        if (folderId != null && !folderId.isBlank()) {
+            List<DriveEntry> entries = fetchDriveEntries(accessToken, folderId);
+            DriveEntry match = findDriveEntryByConfiguredName(entries, fileName);
+            if (match != null) {
+                return match;
+            }
+        }
+
+        return fetchDriveFileByExactName(accessToken, fileName);
+    }
+
+    private static DriveEntry fetchDriveFileById(String accessToken, String fileId)
+        throws IOException, InterruptedException {
+        String url = "https://www.googleapis.com/drive/v3/files/" + URLEncoder.encode(fileId, StandardCharsets.UTF_8)
+            + "?fields=" + URLEncoder.encode("id,name,mimeType,webViewLink,webContentLink,modifiedTime,size", StandardCharsets.UTF_8)
+            + "&supportsAllDrives=true";
+
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(url))
+            .header("Authorization", "Bearer " + accessToken)
+            .header("Accept", "application/json")
+            .GET()
+            .build();
+
+        HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() >= 400) {
+            throw new IOException("Drive API returned " + response.statusCode() + ": " + response.body());
+        }
+
+        String body = response.body();
+        String id = extractJsonString(body, "id");
+        String name = extractJsonString(body, "name");
+        String mimeType = extractJsonString(body, "mimeType");
+        if (id == null || name == null || mimeType == null) {
+            throw new IOException("Google Drive file metadata missing for fileId: " + fileId);
+        }
+
+        return new DriveEntry(
+            id,
+            name,
+            mimeType,
+            extractJsonString(body, "webViewLink"),
+            extractJsonString(body, "webContentLink"),
+            extractJsonString(body, "modifiedTime"),
+            extractJsonString(body, "size")
+        );
+    }
+
     private static Path downloadDriveFileToTemp(String accessToken, DriveEntry entry)
         throws IOException, InterruptedException {
-        String url = "https://www.googleapis.com/drive/v3/files/" + URLEncoder.encode(entry.id(), StandardCharsets.UTF_8)
-            + "?alt=media&supportsAllDrives=true";
+        String url;
+        if ("application/vnd.google-apps.spreadsheet".equals(entry.mimeType())) {
+            url = "https://www.googleapis.com/drive/v3/files/" + URLEncoder.encode(entry.id(), StandardCharsets.UTF_8)
+                + "/export?mimeType=" + URLEncoder.encode(XLSX_MIME_TYPE, StandardCharsets.UTF_8);
+        } else {
+            url = "https://www.googleapis.com/drive/v3/files/" + URLEncoder.encode(entry.id(), StandardCharsets.UTF_8)
+                + "?alt=media&supportsAllDrives=true";
+        }
 
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(url))
@@ -1171,6 +1281,31 @@ public final class CrmServer {
         Path tempFile = Files.createTempFile("venus-crm-drive-workbook-", ".xlsx");
         Files.write(tempFile, response.body());
         return tempFile;
+    }
+
+    private static DriveEntry findDriveEntryByConfiguredName(List<DriveEntry> entries, String configuredName) {
+        for (DriveEntry entry : entries) {
+            if (configuredName.equals(entry.name())) {
+                return entry;
+            }
+        }
+
+        String normalizedConfigured = normalizeDriveWorkbookName(configuredName);
+        for (DriveEntry entry : entries) {
+            if (normalizedConfigured.equals(normalizeDriveWorkbookName(entry.name()))) {
+                return entry;
+            }
+        }
+
+        return null;
+    }
+
+    private static String normalizeDriveWorkbookName(String value) {
+        String normalized = value == null ? "" : value.trim().toLowerCase();
+        if (normalized.endsWith(".xlsx")) {
+            normalized = normalized.substring(0, normalized.length() - 5);
+        }
+        return normalized.replace(" ", "");
     }
 
     private static String escapeDriveQueryLiteral(String value) {
@@ -1435,11 +1570,28 @@ public final class CrmServer {
     private static void ensureDatabaseSchema() throws Exception {
         String sql = Files.readString(Path.of("src/main/resources/db/schema.sql"), StandardCharsets.UTF_8);
         runMysqlUpdate(sql);
+        ensureSeedCompanies();
         ensureCrmProjectRowsSourceKeyColumn();
         ensureCrmProjectRowsPhaseStatusColumns();
         ensureCompaniesSortOrderColumn();
         ensureUsersSecurityColumns();
         seedAuthData();
+    }
+
+    private static void ensureSeedCompanies() throws Exception {
+        for (Company company : SEED_COMPANIES) {
+            runMysqlUpdate(
+                "INSERT INTO companies (id, name, short_name, color) VALUES ("
+                    + "'" + sqlEscape(company.id()) + "',"
+                    + "'" + sqlEscape(company.name()) + "',"
+                    + "'" + sqlEscape(company.shortName()) + "',"
+                    + "'" + sqlEscape(company.color()) + "'"
+                    + ") ON DUPLICATE KEY UPDATE "
+                    + "name = VALUES(name), "
+                    + "short_name = VALUES(short_name), "
+                    + "color = VALUES(color);"
+            );
+        }
     }
 
     private static void ensureCrmProjectRowsSourceKeyColumn() throws Exception {
@@ -1456,6 +1608,8 @@ public final class CrmServer {
         ensureCrmProjectRowsColumn("phase_2_status", "VARCHAR(64) NOT NULL DEFAULT ''", "AFTER phase_1_status");
         ensureCrmProjectRowsColumn("phase_3_status", "VARCHAR(64) NOT NULL DEFAULT ''", "AFTER phase_2_status");
         ensureCrmProjectRowsColumn("msa_signer", "VARCHAR(255) NOT NULL DEFAULT ''", "AFTER phase_3_status");
+        ensureCrmProjectRowsColumn("note", "TEXT NOT NULL", "AFTER msa_signer");
+        ensureCrmProjectRowsColumn("cell_style_json", "TEXT NOT NULL", "AFTER note");
     }
 
     private static void ensureCrmProjectRowsColumn(String columnName, String definition, String positionClause) throws Exception {
@@ -1482,6 +1636,9 @@ public final class CrmServer {
                 WHEN 'luminarytech' THEN 6
                 WHEN 'banyan-digital' THEN 7
                 WHEN 'momentum-growth' THEN 8
+                WHEN 'biocheck' THEN 9
+                WHEN 'crestpoint-hr' THEN 10
+                WHEN 'novasoft-tech' THEN 11
                 ELSE 999
             END;
             """);
@@ -1668,7 +1825,7 @@ public final class CrmServer {
     }
 
     private static List<ProjectRowRecord> loadProjectRowRecordsFromDatabase(String companyId) throws Exception {
-        String sql = "SELECT id, source, source_key, company_id, client_company, quo_number, quo_status, msa_number, msa_status, row_date, amount_gbp, related_invoice, deliverables, engagement_type, start_date, delivery_date, phase_1_status, phase_2_status, phase_3_status, msa_signer, completion_status "
+        String sql = "SELECT id, source, source_key, company_id, client_company, quo_number, quo_status, msa_number, msa_status, row_date, amount_gbp, related_invoice, deliverables, engagement_type, start_date, delivery_date, phase_1_status, phase_2_status, phase_3_status, msa_signer, note, completion_status, cell_style_json "
             + "FROM crm_project_rows WHERE company_id = '" + sqlEscape(companyId) + "' ORDER BY client_company, quo_number, id;";
         String output = runMysqlQuery(sql);
         return parseMysqlProjectRows(output, companyId);
@@ -1694,7 +1851,7 @@ public final class CrmServer {
             if (!row.sourceKey().isBlank() && manualRowsBySourceKey.containsKey(row.sourceKey())) {
                 continue;
             }
-            sql.append("INSERT INTO crm_project_rows (company_id, source, source_key, client_company, quo_number, quo_status, msa_number, msa_status, row_date, amount_gbp, related_invoice, deliverables, engagement_type, start_date, delivery_date, phase_1_status, phase_2_status, phase_3_status, msa_signer, completion_status) VALUES (");
+            sql.append("INSERT INTO crm_project_rows (company_id, source, source_key, client_company, quo_number, quo_status, msa_number, msa_status, row_date, amount_gbp, related_invoice, deliverables, engagement_type, start_date, delivery_date, phase_1_status, phase_2_status, phase_3_status, msa_signer, note, completion_status, cell_style_json) VALUES (");
             sql.append("'").append(sqlEscape(companyId)).append("',");
             sql.append("'").append(sqlEscape(row.source())).append("',");
             sql.append("'").append(sqlEscape(row.sourceKey())).append("',");
@@ -1714,7 +1871,9 @@ public final class CrmServer {
             sql.append("'").append(sqlEscape(row.phase2Status())).append("',");
             sql.append("'").append(sqlEscape(row.phase3Status())).append("',");
             sql.append("'").append(sqlEscape(row.msaSigner())).append("',");
-            sql.append("'").append(sqlEscape(row.completionStatus())).append("');\n");
+            sql.append("'").append(sqlEscape(row.note())).append("',");
+            sql.append("'").append(sqlEscape(row.completionStatus())).append("',");
+            sql.append("'").append(sqlEscape(row.cellStyleJson())).append("');\n");
         }
 
         runMysqlUpdate(sql.toString());
@@ -1730,6 +1889,8 @@ public final class CrmServer {
                 computeSourceKey(companyId, row.clientCompany(), row.quoNumber(), ""),
                 row.clientCompany(),
                 row.quoNumber(),
+                "",
+                "",
                 "",
                 "",
                 "",
@@ -1774,13 +1935,15 @@ public final class CrmServer {
                 + "phase_2_status='" + sqlEscape(row.phase2Status()) + "',"
                 + "phase_3_status='" + sqlEscape(row.phase3Status()) + "',"
                 + "msa_signer='" + sqlEscape(row.msaSigner()) + "',"
-                + "completion_status='" + sqlEscape(row.completionStatus()) + "' "
+                + "note='" + sqlEscape(row.note()) + "',"
+                + "completion_status='" + sqlEscape(row.completionStatus()) + "',"
+                + "cell_style_json='" + sqlEscape(row.cellStyleJson()) + "' "
                 + "WHERE id = " + row.id() + ";";
             runMysqlUpdate(sql);
             return;
         }
 
-        String sql = "INSERT INTO crm_project_rows (company_id, source, source_key, client_company, quo_number, quo_status, msa_number, msa_status, row_date, amount_gbp, related_invoice, deliverables, engagement_type, start_date, delivery_date, phase_1_status, phase_2_status, phase_3_status, msa_signer, completion_status) VALUES ("
+        String sql = "INSERT INTO crm_project_rows (company_id, source, source_key, client_company, quo_number, quo_status, msa_number, msa_status, row_date, amount_gbp, related_invoice, deliverables, engagement_type, start_date, delivery_date, phase_1_status, phase_2_status, phase_3_status, msa_signer, note, completion_status, cell_style_json) VALUES ("
             + "'" + sqlEscape(row.companyId()) + "',"
             + "'" + sqlEscape(row.source()) + "',"
             + "'" + sqlEscape(sourceKey) + "',"
@@ -1800,7 +1963,9 @@ public final class CrmServer {
             + "'" + sqlEscape(row.phase2Status()) + "',"
             + "'" + sqlEscape(row.phase3Status()) + "',"
             + "'" + sqlEscape(row.msaSigner()) + "',"
-            + "'" + sqlEscape(row.completionStatus()) + "');";
+            + "'" + sqlEscape(row.note()) + "',"
+            + "'" + sqlEscape(row.completionStatus()) + "',"
+            + "'" + sqlEscape(row.cellStyleJson()) + "');";
         runMysqlUpdate(sql);
     }
 
@@ -1819,7 +1984,7 @@ public final class CrmServer {
                 continue;
             }
             String[] parts = line.split("\t", -1);
-            if (parts.length < 21) {
+            if (parts.length < 23) {
                 continue;
             }
             rows.add(new ProjectRowRecord(
@@ -1843,7 +2008,9 @@ public final class CrmServer {
                 parts[17],
                 parts[18],
                 parts[19],
-                parts[20]
+                parts[20],
+                parts[21],
+                parts[22]
             ));
         }
 
@@ -1951,7 +2118,9 @@ public final class CrmServer {
             nullToEmpty(extractJsonString(body, "phase2Status")),
             nullToEmpty(extractJsonString(body, "phase3Status")),
             nullToEmpty(extractJsonString(body, "msaSigner")),
-            nullToEmpty(extractJsonString(body, "completionStatus"))
+            nullToEmpty(extractJsonString(body, "note")),
+            nullToEmpty(extractJsonString(body, "completionStatus")),
+            nullToEmpty(extractJsonString(body, "cellStyleJson"))
         );
     }
 
@@ -2271,7 +2440,9 @@ public final class CrmServer {
         String phase2Status,
         String phase3Status,
         String msaSigner,
-        String completionStatus
+        String note,
+        String completionStatus,
+        String cellStyleJson
     ) {
         private String toJson() {
             return "{"
@@ -2296,7 +2467,9 @@ public final class CrmServer {
                 + "\"phase2Status\":\"" + escape(phase2Status) + "\","
                 + "\"phase3Status\":\"" + escape(phase3Status) + "\","
                 + "\"msaSigner\":\"" + escape(msaSigner) + "\","
-                + "\"completionStatus\":\"" + escape(completionStatus) + "\""
+                + "\"note\":\"" + escape(note) + "\","
+                + "\"completionStatus\":\"" + escape(completionStatus) + "\","
+                + "\"cellStyleJson\":\"" + escape(cellStyleJson) + "\""
                 + "}";
         }
     }
@@ -2346,6 +2519,7 @@ public final class CrmServer {
     private record AppConfig(
         String serviceAccountJsonPath,
         Map<String, String> companyWorkbooks,
+        Map<String, String> companyDriveWorkbookFileIds,
         Map<String, String> companyDriveWorkbookFileNames,
         Map<String, String> companyFolders
     ) {
@@ -2361,7 +2535,24 @@ public final class CrmServer {
             putIfPresent(companyWorkbooks, "ripplesoft", env.get("RIPPLESOFT_CRM_XLSX_PATH"));
             putIfPresent(companyWorkbooks, "ripple-mic", env.get("RIPPLE_MIC_CRM_XLSX_PATH"));
             putIfPresent(companyWorkbooks, "luminarytech", env.get("LUMINARYTECH_CRM_XLSX_PATH"));
+            putIfPresent(companyWorkbooks, "banyan-digital", env.get("BANYAN_DIGITAL_CRM_XLSX_PATH"));
             putIfPresent(companyWorkbooks, "momentum-growth", env.get("MOMENTUM_GROWTH_CRM_XLSX_PATH"));
+            putIfPresent(companyWorkbooks, "biocheck", env.get("BIOCHECK_CRM_XLSX_PATH"));
+            putIfPresent(companyWorkbooks, "crestpoint-hr", env.get("CRESTPOINT_HR_CRM_XLSX_PATH"));
+            putIfPresent(companyWorkbooks, "novasoft-tech", env.get("NOVASOFT_TECH_CRM_XLSX_PATH"));
+
+            Map<String, String> companyDriveWorkbookFileIds = new HashMap<>();
+            putIfPresent(companyDriveWorkbookFileIds, "venus", env.get("VENUS_CRM_DRIVE_FILE_ID"));
+            putIfPresent(companyDriveWorkbookFileIds, "trinity-property", env.get("TRINITY_PROPERTY_CRM_DRIVE_FILE_ID"));
+            putIfPresent(companyDriveWorkbookFileIds, "trinity-concierge", env.get("TRINITY_CONCIERGE_CRM_DRIVE_FILE_ID"));
+            putIfPresent(companyDriveWorkbookFileIds, "ripplesoft", env.get("RIPPLESOFT_CRM_DRIVE_FILE_ID"));
+            putIfPresent(companyDriveWorkbookFileIds, "ripple-mic", env.get("RIPPLE_MIC_CRM_DRIVE_FILE_ID"));
+            putIfPresent(companyDriveWorkbookFileIds, "luminarytech", env.get("LUMINARYTECH_CRM_DRIVE_FILE_ID"));
+            putIfPresent(companyDriveWorkbookFileIds, "banyan-digital", env.get("BANYAN_DIGITAL_CRM_DRIVE_FILE_ID"));
+            putIfPresent(companyDriveWorkbookFileIds, "momentum-growth", env.get("MOMENTUM_GROWTH_CRM_DRIVE_FILE_ID"));
+            putIfPresent(companyDriveWorkbookFileIds, "biocheck", env.get("BIOCHECK_CRM_DRIVE_FILE_ID"));
+            putIfPresent(companyDriveWorkbookFileIds, "crestpoint-hr", env.get("CRESTPOINT_HR_CRM_DRIVE_FILE_ID"));
+            putIfPresent(companyDriveWorkbookFileIds, "novasoft-tech", env.get("NOVASOFT_TECH_CRM_DRIVE_FILE_ID"));
 
             Map<String, String> companyDriveWorkbookFileNames = new HashMap<>();
             putIfPresent(companyDriveWorkbookFileNames, "venus", env.get("VENUS_CRM_DRIVE_FILE_NAME"));
@@ -2370,7 +2561,11 @@ public final class CrmServer {
             putIfPresent(companyDriveWorkbookFileNames, "ripplesoft", env.get("RIPPLESOFT_CRM_DRIVE_FILE_NAME"));
             putIfPresent(companyDriveWorkbookFileNames, "ripple-mic", env.get("RIPPLE_MIC_CRM_DRIVE_FILE_NAME"));
             putIfPresent(companyDriveWorkbookFileNames, "luminarytech", env.get("LUMINARYTECH_CRM_DRIVE_FILE_NAME"));
+            putIfPresent(companyDriveWorkbookFileNames, "banyan-digital", env.get("BANYAN_DIGITAL_CRM_DRIVE_FILE_NAME"));
             putIfPresent(companyDriveWorkbookFileNames, "momentum-growth", env.get("MOMENTUM_GROWTH_CRM_DRIVE_FILE_NAME"));
+            putIfPresent(companyDriveWorkbookFileNames, "biocheck", env.get("BIOCHECK_CRM_DRIVE_FILE_NAME"));
+            putIfPresent(companyDriveWorkbookFileNames, "crestpoint-hr", env.get("CRESTPOINT_HR_CRM_DRIVE_FILE_NAME"));
+            putIfPresent(companyDriveWorkbookFileNames, "novasoft-tech", env.get("NOVASOFT_TECH_CRM_DRIVE_FILE_NAME"));
 
             if (companyWorkbooks.isEmpty()
                 && companyDriveWorkbookFileNames.isEmpty()
@@ -2385,9 +2580,13 @@ public final class CrmServer {
             putIfPresent(companyFolders, "ripplesoft", env.get("GOOGLE_DRIVE_RIPPLESOFT_FOLDER_ID"));
             putIfPresent(companyFolders, "ripple-mic", env.get("GOOGLE_DRIVE_RIPPLE_MIC_FOLDER_ID"));
             putIfPresent(companyFolders, "luminarytech", env.get("GOOGLE_DRIVE_LUMINARYTECH_FOLDER_ID"));
+            putIfPresent(companyFolders, "banyan-digital", env.get("GOOGLE_DRIVE_BANYAN_DIGITAL_FOLDER_ID"));
             putIfPresent(companyFolders, "momentum-growth", env.get("GOOGLE_DRIVE_MOMENTUM_GROWTH_FOLDER_ID"));
+            putIfPresent(companyFolders, "biocheck", env.get("GOOGLE_DRIVE_BIOCHECK_FOLDER_ID"));
+            putIfPresent(companyFolders, "crestpoint-hr", env.get("GOOGLE_DRIVE_CRESTPOINT_HR_FOLDER_ID"));
+            putIfPresent(companyFolders, "novasoft-tech", env.get("GOOGLE_DRIVE_NOVASOFT_TECH_FOLDER_ID"));
 
-            return new AppConfig(serviceAccountJsonPath, companyWorkbooks, companyDriveWorkbookFileNames, companyFolders);
+            return new AppConfig(serviceAccountJsonPath, companyWorkbooks, companyDriveWorkbookFileIds, companyDriveWorkbookFileNames, companyFolders);
         }
 
         private String workbookPathForCompany(String companyId) {
@@ -2396,6 +2595,10 @@ public final class CrmServer {
 
         private String driveWorkbookFileNameForCompany(String companyId) {
             return companyDriveWorkbookFileNames.get(companyId);
+        }
+
+        private String driveWorkbookFileIdForCompany(String companyId) {
+            return companyDriveWorkbookFileIds.get(companyId);
         }
 
         private String folderIdForCompany(String companyId) {

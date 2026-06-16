@@ -45,7 +45,10 @@ interface ProjectRow {
   phase2Status: string;
   phase3Status: string;
   msaSigner: string;
+  note: string;
   completionStatus: string;
+  cellStyleJson?: string;
+  cellStyles?: Partial<Record<EditableProjectField, CellFormat>>;
 }
 
 interface NewProjectForm {
@@ -65,6 +68,7 @@ interface NewProjectForm {
   phase2Status: string;
   phase3Status: string;
   msaSigner: string;
+  note: string;
   completionStatus: string;
 }
 
@@ -140,6 +144,41 @@ interface DashboardActivityItem {
   completionStatus: string;
 }
 
+interface PhaseStatusItem {
+  label: string;
+  value: string;
+}
+
+interface CellFormat {
+  fontFamily?: string;
+  fontSize?: number;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+  textColor?: string;
+  backgroundColor?: string;
+  textAlign?: 'left' | 'center' | 'right';
+  numberFormat?: 'plain' | 'currency' | 'percent' | 'decimal1' | 'decimal2';
+}
+
+type EditableProjectField =
+  | 'clientCompany'
+  | 'quoNumber'
+  | 'quoStatus'
+  | 'msaNumber'
+  | 'msaStatus'
+  | 'date'
+  | 'amountGbp'
+  | 'relatedInvoice'
+  | 'deliverables'
+  | 'engagementType'
+  | 'startDate'
+  | 'deliveryDate'
+  | 'completionStatus'
+  | 'msaSigner'
+  | 'note';
+
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -164,6 +203,9 @@ export class AppComponent {
   statusFilter = signal('筛选');
   searchTerm = signal('');
   sortDirection = signal<'asc' | 'desc'>('asc');
+  projectViewMode = signal<'table' | 'grid'>('table');
+  showProjectSearch = signal(false);
+  showProjectFilter = signal(false);
   currentProjectPage = signal(1);
   currentDrivePage = signal(1);
   projects = signal<ProjectRow[]>([]);
@@ -182,6 +224,22 @@ export class AppComponent {
   driveLoading = signal(false);
   driveError = signal('');
   newProject: NewProjectForm = this.createEmptyProjectForm();
+  selectedPhaseProject = signal<ProjectRow | null>(null);
+  editingCell = signal<{ rowId: number; field: EditableProjectField } | null>(null);
+  editingValue = signal('');
+  selectedCell = signal<{ rowId: number; field: EditableProjectField } | null>(null);
+  showFormatToolbar = signal(false);
+  readonly fontFamilies = ['Arial', 'Helvetica', 'Georgia', 'Times New Roman', 'Courier New'];
+  readonly projectFilterOptions = [
+    '筛选',
+    '进行中',
+    '待开始',
+    '已完成',
+    '日期从新到旧',
+    '日期从旧到新',
+    '金额从高到低',
+    '金额从低到高'
+  ];
   private authToken = signal(this.readStoredToken());
 
   constructor() {
@@ -213,13 +271,27 @@ export class AppComponent {
   }
 
   onStatusChange(value: string) {
+    this.resetProjectToolbarState('filter');
     this.statusFilter.set(value);
+    this.showProjectFilter.set(false);
     this.currentProjectPage.set(1);
   }
 
   onSearchChange(value: string) {
     this.searchTerm.set(value);
     this.currentProjectPage.set(1);
+  }
+
+  toggleProjectSearch() {
+    const nextOpen = !this.showProjectSearch();
+    this.resetProjectToolbarState(nextOpen ? 'search' : 'none');
+    this.showProjectSearch.set(nextOpen);
+  }
+
+  toggleProjectFilter() {
+    const nextOpen = !this.showProjectFilter();
+    this.resetProjectToolbarState(nextOpen ? 'filter' : 'none');
+    this.showProjectFilter.set(nextOpen);
   }
 
   onCompanyChange(value: string) {
@@ -256,6 +328,24 @@ export class AppComponent {
   showProjectsSection() {
     this.currentSection.set('projects');
     this.currentProjectPage.set(1);
+  }
+
+  setProjectViewMode(mode: 'table' | 'grid') {
+    this.resetProjectToolbarState(mode === 'grid' ? 'grid' : 'none');
+    this.projectViewMode.set(mode);
+    if (mode !== 'table') {
+      this.showFormatToolbar.set(false);
+      this.selectedCell.set(null);
+      this.cancelInlineEdit();
+    }
+  }
+
+  toggleProjectGridView() {
+    if (this.projectViewMode() === 'grid') {
+      this.setProjectViewMode('table');
+      return;
+    }
+    this.setProjectViewMode('grid');
   }
 
   showDriveSection() {
@@ -299,6 +389,7 @@ export class AppComponent {
   }
 
   openAddModal() {
+    this.resetProjectToolbarState('none');
     this.newProject = this.createEmptyProjectForm();
     this.addProjectError.set('');
     this.editingProjectId.set(null);
@@ -333,6 +424,7 @@ export class AppComponent {
       phase2Status: project.phase2Status,
       phase3Status: project.phase3Status,
       msaSigner: project.msaSigner,
+      note: project.note,
       completionStatus: project.completionStatus
     };
     this.editingProjectId.set(project.id);
@@ -379,6 +471,7 @@ export class AppComponent {
       phase2Status: this.newProject.phase2Status,
       phase3Status: this.newProject.phase3Status,
       msaSigner: this.newProject.msaSigner.trim(),
+      note: this.newProject.note.trim(),
       completionStatus: this.newProject.completionStatus
     };
 
@@ -414,6 +507,7 @@ export class AppComponent {
     const currentSession = this.session();
     if (!currentSession || this.syncingProjects()) return;
 
+    this.resetProjectToolbarState('none');
     this.syncingProjects.set(true);
     this.syncError.set('');
 
@@ -425,7 +519,7 @@ export class AppComponent {
       )
       .subscribe({
         next: (rows) => {
-          this.projects.set(rows || []);
+          this.projects.set((rows || []).map((row) => this.hydrateProjectRow(row)));
           this.loadDashboardData();
           this.projectsLoading.set(false);
           this.syncingProjects.set(false);
@@ -436,6 +530,272 @@ export class AppComponent {
           this.syncError.set('同步失败，请确认 Google Drive 文件和 Java backend 正在运行。');
         }
       });
+  }
+
+  startInlineEdit(row: ProjectRow, field: EditableProjectField) {
+    this.selectedCell.set({ rowId: row.id, field });
+    this.editingCell.set({ rowId: row.id, field });
+    this.editingValue.set(row[field] || '');
+  }
+
+  updateInlineEditValue(value: string) {
+    this.editingValue.set(value);
+  }
+
+  isEditingCell(rowId: number, field: EditableProjectField) {
+    const cell = this.editingCell();
+    return cell?.rowId === rowId && cell.field === field;
+  }
+
+  cancelInlineEdit() {
+    this.editingCell.set(null);
+    this.editingValue.set('');
+  }
+
+  saveInlineEdit(row: ProjectRow, field: EditableProjectField) {
+    const nextValue = this.editingValue();
+    this.cancelInlineEdit();
+    if ((row[field] || '') === nextValue) {
+      return;
+    }
+
+    this.saveProjectRow(row, { [field]: nextValue });
+  }
+
+  inlineFieldInputType(field: EditableProjectField) {
+    if (field === 'date' || field === 'startDate' || field === 'deliveryDate') {
+      return 'date';
+    }
+    return 'text';
+  }
+
+  isInlineSelectField(field: EditableProjectField) {
+    return [
+      'quoStatus',
+      'msaStatus',
+      'engagementType',
+      'completionStatus'
+    ].includes(field);
+  }
+
+  inlineSelectOptions(field: EditableProjectField) {
+    switch (field) {
+      case 'quoStatus':
+        return ['草稿', '已发送', '已批准', '已拒绝'];
+      case 'msaStatus':
+        return ['未开始', '处理中', '已签署', '已终止', 'signed'];
+      case 'engagementType':
+        return ['one-off', 'phase-based'];
+      case 'completionStatus':
+        return ['进行中', '待开始', '已完成'];
+      default:
+        return [];
+    }
+  }
+
+  toggleFormatToolbar() {
+    if (this.showFormatToolbar()) {
+      this.resetProjectToolbarState('none');
+      this.showFormatToolbar.set(false);
+      return;
+    }
+
+    this.setProjectViewMode('table');
+    this.resetProjectToolbarState('format');
+    this.showFormatToolbar.set(true);
+  }
+
+  toggleProjectFormat() {
+    if (this.showFormatToolbar()) {
+      this.toggleFormatToolbar();
+      return;
+    }
+
+    this.setProjectViewMode('table');
+    this.toggleFormatToolbar();
+  }
+
+  private resetProjectToolbarState(active: 'search' | 'grid' | 'format' | 'filter' | 'none') {
+    if (active !== 'search') {
+      this.showProjectSearch.set(false);
+      this.searchTerm.set('');
+    }
+
+    if (active !== 'grid' && active !== 'search') {
+      this.projectViewMode.set('table');
+    }
+
+    if (active !== 'format') {
+      this.showFormatToolbar.set(false);
+      this.selectedCell.set(null);
+      this.cancelInlineEdit();
+    }
+
+    if (active !== 'filter') {
+      this.statusFilter.set('筛选');
+      this.showProjectFilter.set(false);
+    }
+  }
+
+  selectCell(row: ProjectRow, field: EditableProjectField) {
+    this.selectedCell.set({ rowId: row.id, field });
+  }
+
+  isSelectedCell(rowId: number, field: EditableProjectField) {
+    const selected = this.selectedCell();
+    return selected?.rowId === rowId && selected.field === field;
+  }
+
+  selectedCellFormat() {
+    const selected = this.selectedCell();
+    if (!selected) {
+      return null;
+    }
+
+    const row = this.projects().find((item) => item.id === selected.rowId);
+    return row?.cellStyles?.[selected.field] || null;
+  }
+
+  selectedCellLabel() {
+    const selected = this.selectedCell();
+    if (!selected) {
+      return '未选择单元格';
+    }
+    return this.fieldLabel(selected.field);
+  }
+
+  setSelectedCellFontFamily(value: string) {
+    this.updateSelectedCellFormat({ fontFamily: value });
+  }
+
+  setSelectedCellFontSize(value: number) {
+    this.updateSelectedCellFormat({ fontSize: value });
+  }
+
+  adjustSelectedCellFontSize(delta: number) {
+    const currentSize = this.selectedCellFormat()?.fontSize || 13;
+    this.updateSelectedCellFormat({ fontSize: Math.max(8, Math.min(48, currentSize + delta)) });
+  }
+
+  toggleSelectedCellMark(mark: 'bold' | 'italic' | 'underline' | 'strikethrough') {
+    const current = this.selectedCellFormat();
+    this.updateSelectedCellFormat({ [mark]: !current?.[mark] } as Partial<CellFormat>);
+  }
+
+  setSelectedCellTextColor(value: string) {
+    this.updateSelectedCellFormat({ textColor: value });
+  }
+
+  setSelectedCellBackgroundColor(value: string) {
+    this.updateSelectedCellFormat({ backgroundColor: value });
+  }
+
+  setSelectedCellTextAlign(value: 'left' | 'center' | 'right') {
+    this.updateSelectedCellFormat({ textAlign: value });
+  }
+
+  setSelectedCellNumberFormat(value: CellFormat['numberFormat']) {
+    this.updateSelectedCellFormat({ numberFormat: value || 'plain' });
+  }
+
+  clearSelectedCellFormat() {
+    const selected = this.selectedCell();
+    if (!selected) {
+      return;
+    }
+
+    const row = this.projects().find((item) => item.id === selected.rowId);
+    if (!row) {
+      return;
+    }
+
+    const nextStyles = { ...(row.cellStyles || {}) };
+    delete nextStyles[selected.field];
+
+    const updatedRow: ProjectRow = {
+      ...row,
+      cellStyles: nextStyles,
+      cellStyleJson: JSON.stringify(nextStyles)
+    };
+
+    this.projects.set(this.projects().map((item) => item.id === row.id ? updatedRow : item));
+    this.saveProjectRow(updatedRow, {});
+  }
+
+  cellDisplayStyle(row: ProjectRow, field: EditableProjectField) {
+    const format = row.cellStyles?.[field];
+    if (!format) {
+      return {};
+    }
+
+    return {
+      'font-family': format.fontFamily || null,
+      'font-size.px': format.fontSize || null,
+      'font-weight': format.bold ? '700' : null,
+      'font-style': format.italic ? 'italic' : null,
+      'text-decoration': [
+        format.underline ? 'underline' : '',
+        format.strikethrough ? 'line-through' : ''
+      ].filter(Boolean).join(' ') || null,
+      color: format.textColor || null,
+      'background-color': format.backgroundColor || null,
+      'text-align': format.textAlign || null
+    };
+  }
+
+  formattedCellValue(row: ProjectRow, field: EditableProjectField) {
+    const value = row[field] || '';
+    const numberFormat = row.cellStyles?.[field]?.numberFormat;
+    if (!numberFormat || value.trim() === '') {
+      return value;
+    }
+
+    const numericValue = Number.parseFloat(value.replace(/,/g, ''));
+    if (Number.isNaN(numericValue)) {
+      return value;
+    }
+
+    switch (numberFormat) {
+      case 'currency':
+        return numericValue.toLocaleString('en-GB', { style: 'currency', currency: 'GBP' });
+      case 'percent':
+        return `${(numericValue * 100).toFixed(2)}%`;
+      case 'decimal1':
+        return numericValue.toFixed(1);
+      case 'decimal2':
+        return numericValue.toFixed(2);
+      default:
+        return value;
+    }
+  }
+
+  private updateSelectedCellFormat(patch: Partial<CellFormat>) {
+    const selected = this.selectedCell();
+    if (!selected) {
+      return;
+    }
+
+    const row = this.projects().find((item) => item.id === selected.rowId);
+    if (!row) {
+      return;
+    }
+
+    const nextStyles: Partial<Record<EditableProjectField, CellFormat>> = {
+      ...(row.cellStyles || {}),
+      [selected.field]: {
+        ...(row.cellStyles?.[selected.field] || {}),
+        ...patch
+      }
+    };
+
+    const updatedRow: ProjectRow = {
+      ...row,
+      cellStyles: nextStyles,
+      cellStyleJson: JSON.stringify(nextStyles)
+    };
+
+    this.projects.set(this.projects().map((item) => item.id === row.id ? updatedRow : item));
+    this.saveProjectRow(updatedRow, {});
   }
 
   filteredProjects() {
@@ -463,6 +823,7 @@ export class AppComponent {
         row.phase2Status,
         row.phase3Status,
         row.msaSigner,
+        row.note,
         row.completionStatus
       ]
         .join(' ')
@@ -676,6 +1037,41 @@ export class AppComponent {
     window.open(targetUrl, '_blank', 'noopener');
   }
 
+  openPhaseStatusModal(project: ProjectRow) {
+    this.selectedPhaseProject.set(project);
+  }
+
+  closePhaseStatusModal() {
+    this.selectedPhaseProject.set(null);
+  }
+
+  phaseStatusItems(project: ProjectRow): PhaseStatusItem[] {
+    const phaseItems = [
+      { order: 1, label: 'Phase 1 完成状态', value: project.phase1Status },
+      { order: 2, label: 'Phase 2 完成状态', value: project.phase2Status },
+      { order: 3, label: 'Phase 3 完成状态', value: project.phase3Status }
+    ];
+
+    return phaseItems
+      .filter((item) => item.value.trim().length > 0)
+      .sort((a, b) => a.order - b.order)
+      .map((item) => ({
+        label: item.label,
+        value: item.value
+      }));
+  }
+
+  hasPhaseStatus(project: ProjectRow) {
+    return [project.phase1Status, project.phase2Status, project.phase3Status].some(
+      (value) => (value || '').trim().length > 0
+    );
+  }
+
+  phaseStatusButtonLabel(project: ProjectRow) {
+    const count = this.phaseStatusItems(project).length;
+    return count > 0 ? `查看 ${count} 个 Phase` : '无 Phase';
+  }
+
   isDriveFolder(item: DriveItem) {
     return item.mimeType === 'application/vnd.google-apps.folder';
   }
@@ -705,12 +1101,41 @@ export class AppComponent {
       )
       .subscribe({
         next: (rows) => {
-          this.projects.set(rows || []);
+          this.projects.set((rows || []).map((row) => this.hydrateProjectRow(row)));
           this.projectsLoading.set(false);
         },
         error: () => {
           this.projects.set([]);
           this.projectsLoading.set(false);
+        }
+      });
+  }
+
+  private saveProjectRow(row: ProjectRow, overrides: Partial<ProjectRow>) {
+    const currentSession = this.session();
+    if (!currentSession) {
+      return;
+    }
+
+    const payload: ProjectRowDbPayload = {
+      ...row,
+      ...overrides,
+      companyId: row.companyId || currentSession.company.id,
+      company: row.company || currentSession.company.name,
+      source: 'manual',
+      sourceKey: row.sourceKey || '',
+      cellStyleJson: JSON.stringify(row.cellStyles || {})
+    };
+
+    this.http
+      .post(`${this.apiBaseUrl}/api/project-rows/save`, payload, this.authOptions())
+      .subscribe({
+        next: () => {
+          this.loadDashboardData();
+          this.loadProjects();
+        },
+        error: () => {
+          this.error.set('单元格保存失败，请确认数据库与 Java backend 正在运行。');
         }
       });
   }
@@ -735,7 +1160,7 @@ export class AppComponent {
         next: (rows) => {
           this.dashboardRows.set(
             (rows || []).map((row) => ({
-              ...row,
+              ...this.hydrateProjectRow(row),
               company: row.company || currentSession.company.name,
               companyId: row.companyId || currentSession.company.id
             }))
@@ -754,6 +1179,25 @@ export class AppComponent {
     return Number.parseFloat((value || '').replace(/,/g, '').trim()) || 0;
   }
 
+  private hydrateProjectRow(row: ProjectRow) {
+    return {
+      ...row,
+      cellStyles: this.parseCellStyles(row.cellStyleJson)
+    };
+  }
+
+  private parseCellStyles(value?: string) {
+    if (!value || !value.trim()) {
+      return {};
+    }
+
+    try {
+      return JSON.parse(value) as Partial<Record<EditableProjectField, CellFormat>>;
+    } catch {
+      return {};
+    }
+  }
+
   private normalizeStatus(value: string) {
     return (value || '').trim().toLowerCase();
   }
@@ -761,6 +1205,28 @@ export class AppComponent {
   private companyNameForId(companyId: string) {
     const currentSession = this.session();
     return currentSession?.companies.find((company) => company.id === companyId)?.name || '';
+  }
+
+  private fieldLabel(field: EditableProjectField) {
+    const labels: Record<EditableProjectField, string> = {
+      clientCompany: '客户公司',
+      quoNumber: 'QUO 编号',
+      quoStatus: 'QUO 状态',
+      msaNumber: 'MSA 编号',
+      msaStatus: 'MSA 状态',
+      date: '日期',
+      amountGbp: '金额 (GBP)',
+      relatedInvoice: '关联发票',
+      deliverables: '交付内容',
+      engagementType: 'one-off/ Phase-based',
+      startDate: '开始日期',
+      deliveryDate: '交付日期',
+      completionStatus: 'one-off 完成状态',
+      msaSigner: '跟进人（MSA签署人）',
+      note: '备注'
+    };
+
+    return labels[field];
   }
 
   private loadDriveFiles() {
@@ -810,6 +1276,7 @@ export class AppComponent {
       phase2Status: '待开始',
       phase3Status: '待开始',
       msaSigner: '',
+      note: '',
       completionStatus: '进行中'
     };
   }
