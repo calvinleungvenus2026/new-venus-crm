@@ -69,16 +69,22 @@ public final class CrmServer {
     private static final int PASSWORD_ITERATIONS = 65_536;
     private static final int PASSWORD_KEY_LENGTH = 256;
     private static final String DEFAULT_PASSWORD = "testtest123";
+    private static final Map<String, String> LEGACY_SEED_EMAIL_MIGRATIONS = Map.of(
+        "admin-crm@ripplesoft.co.uk", "admin-crm@ripplesoftlimited.co.uk",
+        "admin-crm@ripplemic.co.uk", "admin-crm@ripplemiclimited.co.uk",
+        "admin-crm@banyandigital.co.uk", "admin-crm@banyandigitallimited.co.uk"
+    );
     private static final List<SeedAccount> SEED_ACCOUNTS = List.of(
         new SeedAccount("admin-crm@venuslondontechnology.co.uk", DEFAULT_PASSWORD, "Venus London Technology Admin", "COMPANY_ADMIN", List.of("venus")),
         new SeedAccount("admin-crm@propertytrinity.co.uk", DEFAULT_PASSWORD, "Trinity Property Consultancy Admin", "COMPANY_ADMIN", List.of("trinity-property")),
         new SeedAccount("admin-crm@trinityconcierge.co.uk", DEFAULT_PASSWORD, "Trinity London Concierge Admin", "COMPANY_ADMIN", List.of("trinity-concierge")),
-        new SeedAccount("admin-crm@ripplesoft.co.uk", DEFAULT_PASSWORD, "Ripplesoft Admin", "COMPANY_ADMIN", List.of("ripplesoft")),
-        new SeedAccount("admin-crm@ripplemic.co.uk", DEFAULT_PASSWORD, "Ripple MIC Admin", "COMPANY_ADMIN", List.of("ripple-mic")),
+        new SeedAccount("admin-crm@ripplesoftlimited.co.uk", DEFAULT_PASSWORD, "Ripplesoft Admin", "COMPANY_ADMIN", List.of("ripplesoft")),
+        new SeedAccount("admin-crm@ripplemiclimited.co.uk", DEFAULT_PASSWORD, "Ripple MIC Admin", "COMPANY_ADMIN", List.of("ripple-mic")),
         new SeedAccount("admin-crm@luminarytech.co.uk", DEFAULT_PASSWORD, "Luminarytech Admin", "COMPANY_ADMIN", List.of("luminarytech")),
-        new SeedAccount("admin-crm@banyandigital.co.uk", DEFAULT_PASSWORD, "Banyan Digital Admin", "COMPANY_ADMIN", List.of("banyan-digital")),
+        new SeedAccount("admin-crm@banyandigitallimited.co.uk", DEFAULT_PASSWORD, "Banyan Digital Admin", "COMPANY_ADMIN", List.of("banyan-digital")),
+        new SeedAccount("admin-crm@momentumgrowthagency.co.uk", DEFAULT_PASSWORD, "Momentum Growth Agency Admin", "COMPANY_ADMIN", List.of("momentum-growth")),
         new SeedAccount("admin-crm@universal.com", DEFAULT_PASSWORD, "Universal CRM Admin", "SUPER_ADMIN", List.of(
-            "venus", "trinity-property", "trinity-concierge", "ripplesoft", "ripple-mic", "luminarytech", "banyan-digital"
+            "venus", "trinity-property", "trinity-concierge", "ripplesoft", "ripple-mic", "luminarytech", "banyan-digital", "momentum-growth"
         ))
     );
 
@@ -1028,6 +1034,7 @@ public final class CrmServer {
             case "ripple-mic" -> aliases.add(normalizeHeader("RippleMIC"));
             case "luminarytech" -> aliases.add(normalizeHeader("LuminaryTech"));
             case "banyan-digital" -> aliases.add(normalizeHeader("BanyanDigital"));
+            case "momentum-growth" -> aliases.add(normalizeHeader("MomentumGrowth"));
             default -> {
             }
         }
@@ -1474,6 +1481,7 @@ public final class CrmServer {
                 WHEN 'ripple-mic' THEN 5
                 WHEN 'luminarytech' THEN 6
                 WHEN 'banyan-digital' THEN 7
+                WHEN 'momentum-growth' THEN 8
                 ELSE 999
             END;
             """);
@@ -1520,8 +1528,26 @@ public final class CrmServer {
     }
 
     private static void seedAuthData() throws Exception {
+        migrateLegacySeedEmails();
         for (SeedAccount account : SEED_ACCOUNTS) {
             upsertSeedAccount(account);
+        }
+    }
+
+    private static void migrateLegacySeedEmails() throws Exception {
+        for (Map.Entry<String, String> migration : LEGACY_SEED_EMAIL_MIGRATIONS.entrySet()) {
+            String legacyEmail = migration.getKey();
+            String targetEmail = migration.getValue();
+            String targetExists = runMysqlQuery(
+                "SELECT id FROM users WHERE LOWER(email) = LOWER('" + sqlEscape(targetEmail) + "') LIMIT 1;"
+            );
+            if (!targetExists.isBlank()) {
+                continue;
+            }
+            runMysqlUpdate(
+                "UPDATE users SET email = '" + sqlEscape(targetEmail) + "' "
+                    + "WHERE LOWER(email) = LOWER('" + sqlEscape(legacyEmail) + "');"
+            );
         }
     }
 

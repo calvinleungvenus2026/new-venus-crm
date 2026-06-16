@@ -34,7 +34,8 @@ const companies: Company[] = [
   { id: 'ripplesoft', name: 'Ripplesoft Limited', shortName: 'RS', color: '#8b5cf6' },
   { id: 'ripple-mic', name: 'Ripple MIC Limited', shortName: 'RM', color: '#ef4444' },
   { id: 'luminarytech', name: 'Luminarytech Limited', shortName: 'LT', color: '#0ea5e9' },
-  { id: 'banyan-digital', name: 'Banyan Digital Limited', shortName: 'BD', color: '#22c55e' }
+  { id: 'banyan-digital', name: 'Banyan Digital Limited', shortName: 'BD', color: '#22c55e' },
+  { id: 'momentum-growth', name: 'Momentum Growth Agency Limited', shortName: 'MG', color: '#f59e0b' }
 ];
 
 const DEFAULT_PASSWORD = 'testtest123';
@@ -62,14 +63,14 @@ const accounts: Account[] = [
     companyIds: ['trinity-concierge']
   },
   {
-    email: 'admin-crm@ripplesoft.co.uk',
+    email: 'admin-crm@ripplesoftlimited.co.uk',
     password: DEFAULT_PASSWORD,
     name: 'Ripplesoft Admin',
     role: 'COMPANY_ADMIN',
     companyIds: ['ripplesoft']
   },
   {
-    email: 'admin-crm@ripplemic.co.uk',
+    email: 'admin-crm@ripplemiclimited.co.uk',
     password: DEFAULT_PASSWORD,
     name: 'Ripple MIC Admin',
     role: 'COMPANY_ADMIN',
@@ -83,11 +84,18 @@ const accounts: Account[] = [
     companyIds: ['luminarytech']
   },
   {
-    email: 'admin-crm@banyandigital.co.uk',
+    email: 'admin-crm@banyandigitallimited.co.uk',
     password: DEFAULT_PASSWORD,
     name: 'Banyan Digital Admin',
     role: 'COMPANY_ADMIN',
     companyIds: ['banyan-digital']
+  },
+  {
+    email: 'admin-crm@momentumgrowthagency.co.uk',
+    password: DEFAULT_PASSWORD,
+    name: 'Momentum Growth Agency Admin',
+    role: 'COMPANY_ADMIN',
+    companyIds: ['momentum-growth']
   },
   {
     email: 'admin-crm@universal.com',

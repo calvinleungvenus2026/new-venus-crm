@@ -85,7 +85,8 @@ INSERT IGNORE INTO companies (id, name, short_name, color) VALUES
   ('ripplesoft', 'Ripplesoft Limited', 'RS', '#8b5cf6'),
   ('ripple-mic', 'Ripple MIC Limited', 'RM', '#ef4444'),
   ('luminarytech', 'Luminarytech Limited', 'LT', '#0ea5e9'),
-  ('banyan-digital', 'Banyan Digital Limited', 'BD', '#22c55e');
+  ('banyan-digital', 'Banyan Digital Limited', 'BD', '#22c55e'),
+  ('momentum-growth', 'Momentum Growth Agency Limited', 'MG', '#f59e0b');
 
 INSERT INTO projects (company_id, name, description, status, priority, due_date, owners, tasks)
 SELECT 'venus', 'VL · 官网改版', '完成公司官网与营销落地页的整体重设计。', '进行中', '高', '2024-12-31', 'Alice Johnson|Carol Lee', '实现登录功能|测试落地页'
