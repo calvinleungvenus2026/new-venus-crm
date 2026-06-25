@@ -248,49 +248,119 @@
           @if (dashboardLoading()) {
             <div class="projects-banner">正在读取全部公司 Dashboard 数据...</div>
           } @else {
-            <div class="dashboard-hero-grid">
-              <article class="dashboard-card dashboard-card-hero">
+            <section class="dashboard-card dashboard-intelligence-shell">
+              <div class="dashboard-intelligence-copy">
+                <span class="dashboard-section-kicker">CRM Intelligence</span>
+                <h2>{{ session()?.company?.name || '当前公司' }}</h2>
+                <p>把项目表格整理成一个真正能看节奏、看金额、看推进状态的管理视图。这里更适合每天打开一次，快速知道业务量、签署进展和执行面现在在哪里。</p>
+              </div>
+              <div class="dashboard-intelligence-metrics">
+                <article class="dashboard-intelligence-tile">
+                  <span>Signed Value</span>
+                  <strong>{{ formatCurrency(dashboardSignedValue()) }}</strong>
+                </article>
+                <article class="dashboard-intelligence-tile">
+                  <span>Due In 30 Days</span>
+                  <strong>{{ dashboardDueIn30DaysCount() }}</strong>
+                </article>
+                <article class="dashboard-intelligence-tile">
+                  <span>Completion Rate</span>
+                  <strong>{{ dashboardCompletionRate().toFixed(0) }}%</strong>
+                </article>
+                <article class="dashboard-intelligence-tile">
+                  <span>Data Completeness</span>
+                  <strong>{{ dashboardDataCompleteness().toFixed(0) }}%</strong>
+                </article>
+              </div>
+            </section>
+
+            <div class="dashboard-kpi-grid dashboard-kpi-grid-target">
+              <article class="dashboard-card dashboard-kpi-card dashboard-kpi-blue">
                 <span class="dashboard-label">总项目数</span>
                 <strong>{{ dashboardTotalProjects() }}</strong>
-                <p>来自当前公司已存入数据库的 CRM 项目记录</p>
+                <p>当前公司已录入 CRM 的项目总量</p>
               </article>
-              <article class="dashboard-card dashboard-card-hero">
+              <article class="dashboard-card dashboard-kpi-card dashboard-kpi-purple">
                 <span class="dashboard-label">总金额 (GBP)</span>
-                <strong>{{ dashboardTotalAmount().toLocaleString('en-GB', { maximumFractionDigits: 0 }) }}</strong>
-                <p>用于快速判断当前公司的 CRM 商机体量</p>
+                <strong>{{ formatCurrency(dashboardTotalAmount()) }}</strong>
+                <p>判断整体业务体量和项目组合大小</p>
               </article>
-              <article class="dashboard-card dashboard-card-hero">
+              <article class="dashboard-card dashboard-kpi-card dashboard-kpi-teal">
+                <span class="dashboard-label">平均项目金额</span>
+                <strong>{{ formatCurrency(dashboardAverageProjectValue()) }}</strong>
+                <p>看目前是偏大单还是偏分散成交</p>
+              </article>
+              <article class="dashboard-card dashboard-kpi-card dashboard-kpi-orange">
                 <span class="dashboard-label">待跟进 MSA</span>
                 <strong>{{ dashboardPendingMsaCount() }}</strong>
-                <p>MSA 状态为 Pending / Review / 未开始 / 处理中</p>
-              </article>
-              <article class="dashboard-card dashboard-card-hero">
-                <span class="dashboard-label">已完成项目</span>
-                <strong>{{ dashboardCompletedCount() }}</strong>
-                <p>帮助判断当前交付完成率与运营节奏</p>
+                <p>还需要推进签署或确认的项目</p>
               </article>
             </div>
 
-            <div class="dashboard-grid">
+            <div class="dashboard-target-grid">
               <section class="dashboard-card dashboard-section">
                 <div class="dashboard-section-head">
-                  <h2>公司概览</h2>
-                  <p>查看当前公司的项目量、金额与签署进度</p>
+                  <h2>Pipeline 节奏</h2>
+                  <p>从录入、报价、签署到交付完成，快速看项目推进卡在哪一层。</p>
                 </div>
-                <div class="dashboard-company-list">
-                  @for (summary of dashboardCompanySummaries(); track summary.companyId) {
-                    <article class="company-summary-card">
-                      <div class="company-summary-head">
+                <div class="dashboard-pipeline-list">
+                  @for (stage of dashboardPipelineStages(); track stage.label) {
+                    <article class="dashboard-pipeline-card">
+                      <div class="dashboard-pipeline-head">
+                        <div>
+                          <h3>{{ stage.label }}</h3>
+                          <p>{{ stage.subtitle }}</p>
+                        </div>
+                        <strong>{{ stage.count }}</strong>
+                      </div>
+                      <div class="dashboard-pipeline-track">
+                        <span class="dashboard-pipeline-fill" [class.dashboard-pipeline-blue]="stage.tone === 'blue'" [class.dashboard-pipeline-purple]="stage.tone === 'purple'" [class.dashboard-pipeline-teal]="stage.tone === 'teal'" [class.dashboard-pipeline-orange]="stage.tone === 'orange'" [style.width.%]="stage.ratio"></span>
+                      </div>
+                      <div class="dashboard-pipeline-foot">
+                        <span>金额</span>
+                        <strong>{{ formatCurrency(stage.amount) }} GBP</strong>
+                      </div>
+                    </article>
+                  }
+                </div>
+              </section>
+
+              <section class="dashboard-card dashboard-section">
+                <div class="dashboard-section-head">
+                  <h2>月度金额趋势</h2>
+                  <p>按项目日期聚合最近 6 个月的项目金额，用来判断最近业务节奏是否在抬升。</p>
+                </div>
+                <div class="dashboard-trend-chart">
+                  @for (month of dashboardMonthlyTrend(); track month.label) {
+                    <article class="dashboard-trend-bar-group">
+                      <span class="dashboard-trend-amount">{{ formatCurrency(month.amount) }}</span>
+                      <div class="dashboard-trend-bar-shell">
+                        <span class="dashboard-trend-bar" [style.height.%]="month.ratio"></span>
+                      </div>
+                      <strong>{{ month.label }}</strong>
+                      <small>{{ month.count }} 项</small>
+                    </article>
+                  }
+                </div>
+              </section>
+            </div>
+
+            <div class="dashboard-bottom-grid">
+              <div class="dashboard-bottom-main">
+                @for (summary of dashboardCompanySummaries(); track summary.companyId) {
+                  <section class="dashboard-card dashboard-section">
+                    <article class="dashboard-company-strip">
+                      <div class="dashboard-company-strip-head">
                         <span class="company-summary-badge" [style.background]="summary.color">{{ summary.shortName }}</span>
                         <div>
                           <h3>{{ summary.companyName }}</h3>
-                          <p>{{ summary.totalProjects }} 个项目</p>
+                          <p>{{ summary.totalProjects }} 个项目正在被 Dashboard 追踪</p>
                         </div>
                       </div>
-                      <div class="company-summary-metrics">
+                      <div class="dashboard-company-strip-metrics">
                         <div>
                           <span>金额</span>
-                          <strong>{{ summary.totalAmount.toLocaleString('en-GB', { maximumFractionDigits: 0 }) }}</strong>
+                          <strong>{{ formatCurrency(summary.totalAmount) }}</strong>
                         </div>
                         <div>
                           <span>已签 MSA</span>
@@ -302,69 +372,73 @@
                         </div>
                       </div>
                     </article>
-                  }
-                </div>
+                  </section>
+                }
 
-                <div class="dashboard-insight-card">
-                  <div class="dashboard-insight-copy">
-                    <h3>项目类型结构</h3>
-                    <p>用饼图快速看当前公司是以 one-off 交付为主，还是以 phase-based 项目为主。</p>
-                    @if (dashboardEngagementPrimarySlice(); as primarySlice) {
-                      <div class="dashboard-insight-highlight">
-                        <strong>{{ primarySlice.label }}</strong>
-                        <span>{{ primarySlice.count }} 个项目，占当前结构最高</span>
-                      </div>
-                    }
-                    <div class="dashboard-insight-legend">
-                      @for (slice of dashboardEngagementSlices(); track slice.label) {
-                        <div class="dashboard-legend-row">
-                          <span class="dashboard-legend-dot" [style.background]="slice.color"></span>
-                          <span>{{ slice.label }}</span>
-                          <strong>{{ slice.count }}</strong>
+                <section class="dashboard-card dashboard-section">
+                  <div class="dashboard-section-head">
+                    <h2>项目类型结构</h2>
+                    <p>快速判断当前公司的交付模型，是一次性交付为主，还是长期阶段制项目为主。</p>
+                  </div>
+                  <div class="dashboard-bottom-composition">
+                    <div class="dashboard-bottom-composition-copy">
+                      @if (dashboardEngagementPrimarySlice(); as primarySlice) {
+                        <div class="dashboard-insight-highlight">
+                          <strong>{{ primarySlice.label }}</strong>
+                          <span>{{ primarySlice.count }} 个项目，占当前结构最高</span>
                         </div>
                       }
+                      <div class="dashboard-insight-legend">
+                        @for (slice of dashboardEngagementSlices(); track slice.label) {
+                          <div class="dashboard-legend-row">
+                            <span class="dashboard-legend-dot" [style.background]="slice.color"></span>
+                            <span>{{ slice.label }}</span>
+                            <strong>{{ slice.count }}</strong>
+                          </div>
+                        }
+                      </div>
                     </div>
-                  </div>
-                  <div class="dashboard-pie-shell">
-                    <div class="dashboard-pie-chart" [style.background]="dashboardEngagementGradient()">
-                      <div class="dashboard-pie-center">
-                        <strong>{{ dashboardEngagementTotal() }}</strong>
-                        <span>项目</span>
+                    <div class="dashboard-pie-shell">
+                      <div class="dashboard-pie-chart" [style.background]="dashboardEngagementGradient()">
+                        <div class="dashboard-pie-center">
+                          <strong>{{ dashboardEngagementTotal() }}</strong>
+                          <span>项目</span>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </section>
+                </section>
 
-              <section class="dashboard-card dashboard-section">
-                <div class="dashboard-section-head">
-                  <h2>重点客户</h2>
-                  <p>按项目数量和金额排序的高价值客户</p>
-                </div>
-                <div class="dashboard-table">
-                  <div class="dashboard-table-row dashboard-table-head">
-                    <span>客户公司</span>
-                    <span>项目数</span>
-                    <span>金额 (GBP)</span>
+                <section class="dashboard-card dashboard-section">
+                  <div class="dashboard-section-head">
+                    <h2>重点客户</h2>
+                    <p>按项目数量和金额排序的高价值客户。</p>
                   </div>
-                  @for (client of dashboardTopClients(); track client.clientCompany) {
-                    <div class="dashboard-table-row">
-                      <span>{{ client.clientCompany }}</span>
-                      <span>{{ client.projectCount }}</span>
-                      <span>{{ client.totalAmount.toLocaleString('en-GB', { maximumFractionDigits: 0 }) }}</span>
+                  <div class="dashboard-client-table">
+                    <div class="dashboard-client-table-row dashboard-client-table-head">
+                      <span>客户公司</span>
+                      <span>项目数</span>
+                      <span>金额 (GBP)</span>
                     </div>
-                  }
-                </div>
-              </section>
+                    @for (client of dashboardTopClients(); track client.clientCompany) {
+                      <div class="dashboard-client-table-row">
+                        <span>{{ client.clientCompany }}</span>
+                        <span>{{ client.projectCount }}</span>
+                        <span>{{ formatCurrency(client.totalAmount) }}</span>
+                      </div>
+                    }
+                  </div>
+                </section>
+              </div>
             </div>
 
-            <section class="dashboard-card dashboard-section dashboard-activity">
+            <section class="dashboard-card dashboard-section dashboard-activity-panel">
               <div class="dashboard-section-head">
                 <h2>最近活动</h2>
-                <p>按日期查看当前公司的最新 CRM 记录</p>
+                <p>按日期查看最新 CRM 项目记录，适合快速回顾最近新增或推进过的条目。</p>
               </div>
-              <div class="dashboard-table">
-                <div class="dashboard-table-row dashboard-table-head dashboard-activity-head">
+              <div class="dashboard-activity-table">
+                <div class="dashboard-activity-table-row dashboard-activity-table-head">
                   <span>公司</span>
                   <span>客户</span>
                   <span>QUO</span>
@@ -373,13 +447,13 @@
                   <span>完成状态</span>
                 </div>
                 @for (item of dashboardRecentActivities(); track item.companyName + item.quoNumber + item.date) {
-                  <div class="dashboard-table-row dashboard-activity-head">
+                  <div class="dashboard-activity-table-row dashboard-activity-table-wide">
                     <span>{{ item.companyName }}</span>
                     <span>{{ item.clientCompany }}</span>
                     <span>{{ item.quoNumber }}</span>
                     <span>{{ item.date }}</span>
-                    <span>{{ item.amountGbp }}</span>
-                    <span>{{ item.completionStatus || '未填写' }}</span>
+                    <strong>{{ formatCurrency(item.amountGbp) }}</strong>
+                    <span class="mini-chip" [ngClass]="dashboardCompletionStatusClass(item.completionStatus)">{{ dashboardCompletionStatusLabel(item.completionStatus) }}</span>
                   </div>
                 }
               </div>

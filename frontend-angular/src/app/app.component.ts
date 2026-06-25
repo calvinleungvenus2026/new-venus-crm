@@ -144,6 +144,42 @@ interface DashboardActivityItem {
   completionStatus: string;
 }
 
+interface DashboardMetricBar {
+  label: string;
+  count: number;
+  ratio: number;
+  tone: string;
+  helper: string;
+}
+
+interface DashboardClientPerformance extends DashboardClientSummary {
+  share: number;
+  averageValue: number;
+}
+
+interface DashboardTrendMonth {
+  label: string;
+  amount: number;
+  count: number;
+  ratio: number;
+}
+
+interface DashboardPipelineStage {
+  label: string;
+  subtitle: string;
+  count: number;
+  amount: number;
+  ratio: number;
+  tone: 'blue' | 'purple' | 'teal' | 'orange';
+}
+
+interface DashboardPhaseSummary {
+  completed: number;
+  inProgress: number;
+  pending: number;
+  total: number;
+}
+
 interface PhaseStatusItem {
   label: string;
   value: string;
@@ -906,6 +942,244 @@ export class AppComponent {
       .slice(0, 6);
   }
 
+  dashboardClientCount() {
+    const clients = new Set<string>();
+    for (const row of this.dashboardRows()) {
+      const key = row.clientCompany.trim();
+      if (key) {
+        clients.add(key);
+      }
+    }
+
+    return clients.size;
+  }
+
+  dashboardSignedMsaCount() {
+    return this.dashboardRows().filter((row) => this.isSignedMsaStatus(row.msaStatus)).length;
+  }
+
+  dashboardSignedMsaRate() {
+    return this.toPercent(this.dashboardSignedMsaCount(), this.dashboardTotalProjects());
+  }
+
+  dashboardCompletionRate() {
+    return this.toPercent(this.dashboardCompletedCount(), this.dashboardTotalProjects());
+  }
+
+  dashboardSignedValue() {
+    return this.dashboardRows()
+      .filter((row) => this.isSignedMsaStatus(row.msaStatus))
+      .reduce((sum, row) => sum + this.parseAmount(row.amountGbp), 0);
+  }
+
+  dashboardDueIn30DaysCount() {
+    const now = new Date();
+    const end = new Date(now);
+    end.setDate(end.getDate() + 30);
+
+    return this.dashboardRows().filter((row) => {
+      const dueDate = this.parseDate(row.deliveryDate || row.date);
+      return dueDate !== null && dueDate >= now && dueDate <= end;
+    }).length;
+  }
+
+  dashboardDataCompleteness() {
+    const fields: Array<keyof ProjectRow> = [
+      'clientCompany',
+      'quoNumber',
+      'msaNumber',
+      'msaStatus',
+      'date',
+      'amountGbp',
+      'engagementType',
+      'deliveryDate',
+      'completionStatus'
+    ];
+    const rows = this.dashboardRows();
+    if (!rows.length) {
+      return 0;
+    }
+
+    let completed = 0;
+    for (const row of rows) {
+      for (const field of fields) {
+        if (String(row[field] || '').trim()) {
+          completed += 1;
+        }
+      }
+    }
+
+    return (completed / (rows.length * fields.length)) * 100;
+  }
+
+  dashboardAverageProjectValue() {
+    return this.dashboardTotalProjects() ? this.dashboardTotalAmount() / this.dashboardTotalProjects() : 0;
+  }
+
+  dashboardActiveDeliveryCount() {
+    return this.dashboardRows().filter((row) => !this.isCompletedStatus(row.completionStatus)).length;
+  }
+
+  dashboardTopClientConcentration() {
+    const total = this.dashboardTotalAmount();
+    if (total <= 0) {
+      return 0;
+    }
+
+    const topThreeAmount = this.dashboardTopClients()
+      .slice(0, 3)
+      .reduce((sum, client) => sum + client.totalAmount, 0);
+    return this.toPercent(topThreeAmount, total);
+  }
+
+  dashboardRevenueLeaders() {
+    const total = this.dashboardTotalAmount();
+    return this.dashboardTopClients().map((client) => ({
+      ...client,
+      share: total > 0 ? (client.totalAmount / total) * 100 : 0,
+      averageValue: client.projectCount > 0 ? client.totalAmount / client.projectCount : 0
+    } satisfies DashboardClientPerformance));
+  }
+
+  dashboardMonthlyTrend() {
+    const months: DashboardTrendMonth[] = [];
+    const now = new Date();
+    const startMonth = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+
+    for (let index = 0; index < 6; index += 1) {
+      const date = new Date(startMonth.getFullYear(), startMonth.getMonth() + index, 1);
+      months.push({
+        label: date.toLocaleString('en-GB', { month: 'short' }),
+        amount: 0,
+        count: 0,
+        ratio: 0
+      });
+    }
+
+    for (const row of this.dashboardRows()) {
+      const rowDate = this.parseDate(row.date);
+      if (!rowDate) continue;
+      const monthOffset = (rowDate.getFullYear() - startMonth.getFullYear()) * 12 + (rowDate.getMonth() - startMonth.getMonth());
+      if (monthOffset < 0 || monthOffset >= months.length) continue;
+      months[monthOffset].count += 1;
+      months[monthOffset].amount += this.parseAmount(row.amountGbp);
+    }
+
+    const maxAmount = Math.max(...months.map((month) => month.amount), 0);
+    return months.map((month) => ({
+      ...month,
+      ratio: maxAmount > 0 ? (month.amount / maxAmount) * 100 : 6
+    }));
+  }
+
+  dashboardPipelineStages() {
+    const rows = this.dashboardRows();
+    const totalAmount = this.dashboardTotalAmount();
+    const stages: Omit<DashboardPipelineStage, 'ratio'>[] = [
+      {
+        label: '项目已录入',
+        subtitle: '已进入 CRM 的全部项目',
+        count: rows.length,
+        amount: totalAmount,
+        tone: 'blue'
+      },
+      {
+        label: 'QUO 已推进',
+        subtitle: '已有报价动作或报价编号',
+        count: rows.filter((row) => String(row.quoNumber || row.quoStatus || '').trim().length > 0).length,
+        amount: rows
+          .filter((row) => String(row.quoNumber || row.quoStatus || '').trim().length > 0)
+          .reduce((sum, row) => sum + this.parseAmount(row.amountGbp), 0),
+        tone: 'purple'
+      },
+      {
+        label: 'MSA 已签署',
+        subtitle: '适合视作较高确定性的项目',
+        count: this.dashboardSignedMsaCount(),
+        amount: this.dashboardSignedValue(),
+        tone: 'teal'
+      },
+      {
+        label: '交付进行中',
+        subtitle: '仍在执行或等待启动的项目',
+        count: this.dashboardActiveDeliveryCount(),
+        amount: rows
+          .filter((row) => !this.isCompletedStatus(row.completionStatus))
+          .reduce((sum, row) => sum + this.parseAmount(row.amountGbp), 0),
+        tone: 'orange'
+      }
+    ];
+
+    return stages.map((stage) => ({
+      ...stage,
+      ratio: totalAmount > 0 ? (stage.amount / totalAmount) * 100 : 0
+    } satisfies DashboardPipelineStage));
+  }
+
+  dashboardMsaPipeline() {
+    const rows = this.dashboardRows();
+    const total = rows.length || 1;
+    const signed = rows.filter((row) => this.isSignedMsaStatus(row.msaStatus)).length;
+    const pending = rows.filter((row) => this.isPendingMsaStatus(row.msaStatus)).length;
+    const blank = rows.length - signed - pending;
+
+    return [
+      {
+        label: '已签署',
+        count: signed,
+        ratio: (signed / total) * 100,
+        tone: 'positive',
+        helper: '合同已完成签署'
+      },
+      {
+        label: '待跟进',
+        count: pending,
+        ratio: (pending / total) * 100,
+        tone: 'warning',
+        helper: 'Pending / Review / 处理中'
+      },
+      {
+        label: '未更新',
+        count: Math.max(0, blank),
+        ratio: (Math.max(0, blank) / total) * 100,
+        tone: 'neutral',
+        helper: '状态仍待补齐'
+      }
+    ] satisfies DashboardMetricBar[];
+  }
+
+  dashboardDeliveryPipeline() {
+    const rows = this.dashboardRows();
+    const total = rows.length || 1;
+    const completed = rows.filter((row) => this.isCompletedStatus(row.completionStatus)).length;
+    const inProgress = rows.filter((row) => this.isInProgressCompletionStatus(row.completionStatus)).length;
+    const blank = rows.length - completed - inProgress;
+
+    return [
+      {
+        label: '已完成',
+        count: completed,
+        ratio: (completed / total) * 100,
+        tone: 'positive',
+        helper: '交付已经落地'
+      },
+      {
+        label: '执行中',
+        count: inProgress,
+        ratio: (inProgress / total) * 100,
+        tone: 'accent',
+        helper: '项目正在推进'
+      },
+      {
+        label: '待启动',
+        count: Math.max(0, blank),
+        ratio: (Math.max(0, blank) / total) * 100,
+        tone: 'neutral',
+        helper: '未开始或未填写'
+      }
+    ] satisfies DashboardMetricBar[];
+  }
+
   dashboardEngagementSlices() {
     const counts = new Map<string, DashboardPieSlice>([
       ['one-off', { label: 'One-off', count: 0, color: '#2563eb' }],
@@ -980,11 +1254,79 @@ export class AppComponent {
     }).length;
   }
 
+  dashboardDeliveryRiskCount() {
+    return this.dashboardRows().filter((row) => {
+      const dueDate = this.parseDate(row.deliveryDate || row.date);
+      return dueDate !== null && dueDate < new Date() && !this.isCompletedStatus(row.completionStatus);
+    }).length;
+  }
+
   dashboardCompletedCount() {
     return this.dashboardRows().filter((row) => {
       const status = this.normalizeStatus(row.completionStatus);
       return status.includes('completed') || status.includes('已完成');
     }).length;
+  }
+
+  dashboardPhaseSummary() {
+    const summary: DashboardPhaseSummary = {
+      completed: 0,
+      inProgress: 0,
+      pending: 0,
+      total: 0
+    };
+
+    for (const row of this.dashboardRows()) {
+      const engagement = this.normalizeStatus(row.engagementType);
+      if (!engagement.includes('phase')) {
+        continue;
+      }
+
+      const statuses = [row.phase1Status, row.phase2Status, row.phase3Status];
+      for (const statusValue of statuses) {
+        const status = this.normalizeStatus(statusValue);
+        if (!status) {
+          continue;
+        }
+
+        summary.total += 1;
+        if (status.includes('已完成') || status.includes('completed')) {
+          summary.completed += 1;
+        } else if (status.includes('进行中') || status.includes('in progress') || status.includes('处理中')) {
+          summary.inProgress += 1;
+        } else {
+          summary.pending += 1;
+        }
+      }
+    }
+
+    return summary;
+  }
+
+  dashboardPhaseCompletionRate() {
+    const summary = this.dashboardPhaseSummary();
+    return this.toPercent(summary.completed, summary.total);
+  }
+
+  formatCurrency(value: number | string) {
+    const amount = typeof value === 'number' ? value : this.parseAmount(value);
+    return amount.toLocaleString('en-GB', { maximumFractionDigits: 0 });
+  }
+
+  dashboardCompletionStatusLabel(value: string) {
+    return (value || '').trim() || '未填写';
+  }
+
+  dashboardCompletionStatusClass(value: string) {
+    if (this.isCompletedStatus(value)) {
+      return 'dashboard-status-positive';
+    }
+
+    if (this.isInProgressCompletionStatus(value)) {
+      return 'dashboard-status-warning';
+    }
+
+    return 'dashboard-status-neutral';
   }
 
   paginatedProjects() {
@@ -1179,6 +1521,14 @@ export class AppComponent {
     return Number.parseFloat((value || '').replace(/,/g, '').trim()) || 0;
   }
 
+  private toPercent(value: number, total: number) {
+    if (!total) {
+      return 0;
+    }
+
+    return (value / total) * 100;
+  }
+
   private hydrateProjectRow(row: ProjectRow) {
     return {
       ...row,
@@ -1200,6 +1550,35 @@ export class AppComponent {
 
   private normalizeStatus(value: string) {
     return (value || '').trim().toLowerCase();
+  }
+
+  private parseDate(value?: string) {
+    if (!value || !value.trim()) {
+      return null;
+    }
+
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  private isSignedMsaStatus(value: string) {
+    const status = this.normalizeStatus(value);
+    return status.includes('signed') || status.includes('已签');
+  }
+
+  private isPendingMsaStatus(value: string) {
+    const status = this.normalizeStatus(value);
+    return status.includes('pending') || status.includes('review') || status.includes('未开始') || status.includes('处理中');
+  }
+
+  private isCompletedStatus(value: string) {
+    const status = this.normalizeStatus(value);
+    return status.includes('completed') || status.includes('已完成');
+  }
+
+  private isInProgressCompletionStatus(value: string) {
+    const status = this.normalizeStatus(value);
+    return status.includes('进行中') || status.includes('in progress') || status.includes('处理中');
   }
 
   private companyNameForId(companyId: string) {
