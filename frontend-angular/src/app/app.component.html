@@ -59,6 +59,8 @@
       <button class="nav-subitem nav-link" [class.active]="currentSection() === 'dashboard'" (click)="showDashboardSection()">Dashboard</button>
       <div class="nav-item">{{ session()!.company.shortName }} 项目管理</div>
       <button class="nav-subitem nav-link" [class.active]="currentSection() === 'projects'" (click)="showProjectsSection()">项目</button>
+      <button class="nav-subitem nav-link" [class.active]="currentSection() === 'invoices'" (click)="showInvoicesSection()">项目汇总</button>
+      <button class="nav-subitem nav-link" [class.active]="currentSection() === 'invoice-details'" (click)="showInvoiceDetailsSection()">发票明细</button>
       <button class="nav-subitem nav-link" [class.active]="currentSection() === 'drive'" (click)="showDriveSection()">Google Drive</button>
 
       <button class="logout-button" (click)="logout()">退出登录</button>
@@ -69,9 +71,17 @@
         <div class="toolbar-title">
           @if (currentSection() === 'dashboard') {
             CRM Dashboard
-          } @else if (currentSection() === 'projects') {
+          }
+          @if (currentSection() === 'projects') {
             {{ session()!.company.name }} 项目表格
-          } @else {
+          }
+          @if (currentSection() === 'invoices') {
+            {{ session()!.company.name }} 项目汇总
+          }
+          @if (currentSection() === 'invoice-details') {
+            {{ session()!.company.name }} 发票明细
+          }
+          @if (currentSection() === 'drive') {
             {{ session()!.company.name }} Google Drive
           }
         </div>
@@ -171,6 +181,97 @@
             </div>
           </div>
         }
+        <div class="toolbar-actions" [style.display]="currentSection() === 'invoices' || currentSection() === 'invoice-details' ? 'flex' : 'none'">
+          <div class="toolbar-command-bar toolbar-command-bar-unified">
+            <div class="command-search-slot" [class.command-search-slot-expanded]="showProjectSummarySearch()">
+              <button
+                class="command-button command-button-icon command-search-trigger"
+                [class.command-button-active]="showProjectSummarySearch()"
+                (click)="toggleProjectSummarySearch()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="11" cy="11" r="6.5"></circle>
+                  <path d="M16 16L21 21"></path>
+                </svg>
+              </button>
+              @if (showProjectSummarySearch()) {
+                <input
+                  class="command-search-input"
+                  [ngModel]="projectSummarySearchTerm()"
+                  (ngModelChange)="onProjectSummarySearchChange($event)"
+                  name="projectSummarySearch"
+                  type="text"
+                  placeholder="搜索所有列"
+                >
+              }
+            </div>
+            <button class="command-button" [disabled]="projectSummaryLoading()" (click)="loadProjectSummary()">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 12A8 8 0 1 1 17.2 6"></path>
+                <path d="M20 4V10H14"></path>
+              </svg>
+              <span>{{ projectSummaryLoading() ? '同步中...' : '同步' }}</span>
+            </button>
+            <button class="command-button" (click)="openAddModal()">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5V19"></path>
+                <path d="M5 12H19"></path>
+              </svg>
+              <span>新增项目</span>
+            </button>
+            <div class="command-filter-slot">
+              <button
+                class="command-button"
+                [class.command-button-active]="showProjectSummaryFilter()"
+                (click)="toggleProjectSummaryFilter()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 6H20L14 12V19L10 17V12L4 6Z"></path>
+                </svg>
+                <span>{{ projectSummaryStatusFilter() === '筛选' ? '筛选' : projectSummaryStatusFilter() }}</span>
+              </button>
+              @if (showProjectSummaryFilter()) {
+                <div class="command-filter-menu">
+                  @for (option of projectSummaryFilterOptions(); track option) {
+                    <button
+                      class="command-filter-option"
+                      [class.command-filter-option-active]="projectSummaryStatusFilter() === option"
+                      (click)="onProjectSummaryStatusChange(option)"
+                    >
+                      <span class="command-filter-check">{{ projectSummaryStatusFilter() === option ? '✓' : '' }}</span>
+                      <span>{{ option }}</span>
+                    </button>
+                  }
+                </div>
+              }
+            </div>
+            <button
+              class="command-button"
+              [class.command-button-active]="projectSummaryViewMode() === 'grid'"
+              (click)="toggleProjectSummaryGridView()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="4" y="4" width="7" height="7"></rect>
+                <rect x="13" y="4" width="7" height="7"></rect>
+                <rect x="4" y="13" width="7" height="7"></rect>
+                <rect x="13" y="13" width="7" height="7"></rect>
+              </svg>
+              <span>网格</span>
+            </button>
+            <button
+              class="command-button"
+              [class.command-button-active]="showProjectSummaryFormatToolbar() && projectSummaryViewMode() === 'table'"
+              (click)="toggleProjectSummaryFormat()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 14L10 8L16 14L10 20L4 14Z"></path>
+                <path d="M10 8L14 4L20 10L16 14"></path>
+                <path d="M4 20H20"></path>
+              </svg>
+              <span>格式</span>
+            </button>
+          </div>
+        </div>
       </header>
 
       @if (currentSection() === 'projects' && projectViewMode() === 'table' && showFormatToolbar()) {
@@ -236,6 +337,77 @@
                 <span></span><span></span><span></span><span></span>
               </span>
             </button>
+          </div>
+        </section>
+      }
+
+      @if ((currentSection() === 'invoices' || currentSection() === 'invoice-details') && projectSummaryViewMode() === 'table' && showProjectSummaryFormatToolbar()) {
+        <section class="format-toolbar">
+          <div class="format-toolbar-group">
+            <span class="format-toolbar-label">{{ projectSummarySelectedCellLabel() }}</span>
+            <button class="secondary-button" (click)="clearProjectSummarySelectedCellFormat()">清除格式</button>
+          </div>
+          <div class="format-toolbar-group">
+            <select [ngModel]="projectSummarySelectedCellFormat()?.fontFamily || 'Arial'" (ngModelChange)="setProjectSummarySelectedCellFontFamily($event)">
+              @for (font of fontFamilies; track font) {
+                <option [value]="font">{{ font }}</option>
+              }
+            </select>
+            <button class="icon-button" (click)="adjustProjectSummarySelectedCellFontSize(-1)">-</button>
+            <input class="font-size-input" type="number" [ngModel]="projectSummarySelectedCellFormat()?.fontSize || 13" (ngModelChange)="setProjectSummarySelectedCellFontSize($event ? +$event : 13)">
+            <button class="icon-button" (click)="adjustProjectSummarySelectedCellFontSize(1)">+</button>
+          </div>
+          <div class="format-toolbar-group">
+            <button class="icon-button" [class.active]="projectSummarySelectedCellFormat()?.bold" (click)="toggleProjectSummarySelectedCellMark('bold')"><strong>B</strong></button>
+            <button class="icon-button" [class.active]="projectSummarySelectedCellFormat()?.italic" (click)="toggleProjectSummarySelectedCellMark('italic')"><em>I</em></button>
+            <button class="icon-button" [class.active]="projectSummarySelectedCellFormat()?.underline" (click)="toggleProjectSummarySelectedCellMark('underline')"><u>U</u></button>
+            <button class="icon-button" [class.active]="projectSummarySelectedCellFormat()?.strikethrough" (click)="toggleProjectSummarySelectedCellMark('strikethrough')"><s>S</s></button>
+          </div>
+          <div class="format-toolbar-group">
+            <label class="color-input">
+              A
+              <input type="color" [ngModel]="projectSummarySelectedCellFormat()?.textColor || '#172033'" (ngModelChange)="setProjectSummarySelectedCellTextColor($event)">
+            </label>
+            <label class="color-input">
+              Fill
+              <input type="color" [ngModel]="projectSummarySelectedCellFormat()?.backgroundColor || '#ffffff'" (ngModelChange)="setProjectSummarySelectedCellBackgroundColor($event)">
+            </label>
+          </div>
+          <div class="format-toolbar-group">
+            <button
+              class="icon-button align-button"
+              [class.active]="projectSummarySelectedCellFormat()?.textAlign === 'left'"
+              (click)="setProjectSummarySelectedCellTextAlign('left')"
+              aria-label="Align left"
+            >
+              <span class="align-icon align-left">
+                <span></span><span></span><span></span><span></span>
+              </span>
+            </button>
+            <button
+              class="icon-button align-button"
+              [class.active]="projectSummarySelectedCellFormat()?.textAlign === 'center'"
+              (click)="setProjectSummarySelectedCellTextAlign('center')"
+              aria-label="Align center"
+            >
+              <span class="align-icon align-center">
+                <span></span><span></span><span></span><span></span>
+              </span>
+            </button>
+            <button
+              class="icon-button align-button"
+              [class.active]="projectSummarySelectedCellFormat()?.textAlign === 'right'"
+              (click)="setProjectSummarySelectedCellTextAlign('right')"
+              aria-label="Align right"
+            >
+              <span class="align-icon align-right">
+                <span></span><span></span><span></span><span></span>
+              </span>
+            </button>
+          </div>
+          <div class="format-toolbar-group">
+            <button class="secondary-button" [class.active]="projectSummaryClampLines() === 1" (click)="setProjectSummaryClampLines(1)">单行</button>
+            <button class="secondary-button" [class.active]="projectSummaryClampLines() === 2" (click)="setProjectSummaryClampLines(2)">双行</button>
           </div>
         </section>
       }
@@ -693,6 +865,138 @@
             <button class="secondary-button" [disabled]="currentProjectPage() >= projectTotalPages()" (click)="goToProjectPage(currentProjectPage() + 1)">下一页</button>
           </div>
         </div>
+      } @else if (currentSection() === 'invoices' || currentSection() === 'invoice-details') {
+        @if (projectSummaryError()) {
+          <div class="projects-banner projects-banner-error">{{ projectSummaryError() }}</div>
+        }
+        @if (projectSummaryLoading()) {
+          <div class="projects-banner">正在读取{{ currentDetailSectionLabel() }}...</div>
+        } @else {
+          @if (projectSummaryViewMode() === 'grid') {
+            <section class="projects-grid-view">
+              @for (record of paginatedProjectSummaryRows(); track record.rowId) {
+                <article class="project-grid-card summary-grid-card">
+                  <div class="project-grid-card-head">
+                    <div>
+                      <p class="project-grid-label">{{ projectSummaryHeaders()[0] || '客户公司名' }}</p>
+                      <h3>{{ record.row[0] || '未填写' }}</h3>
+                    </div>
+                    @if (currentDetailHasStatusColumn() && projectSummaryGridStatusValue(record.row)) {
+                      <span class="chip" [ngClass]="projectSummaryStatusClass(projectSummaryGridStatusValue(record.row))">{{ projectSummaryGridStatusValue(record.row) }}</span>
+                    }
+                  </div>
+                  <div class="project-grid-card-body summary-grid-body">
+                    @for (header of projectSummaryHeaders(); track header; let idx = $index) {
+                      @if (record.row[idx]) {
+                        <div class="project-grid-item" [class.project-grid-item-wide]="projectSummaryShouldWrap(idx)">
+                          <span>{{ header }}</span>
+                          <strong [title]="record.row[idx]">{{ record.row[idx] }}</strong>
+                        </div>
+                      }
+                    }
+                  </div>
+                </article>
+              }
+            </section>
+          } @else {
+            <div class="table-wrap summary-table-wrap">
+              <table class="summary-table">
+                  <thead>
+                    <tr>
+                      @for (header of projectSummaryHeaders(); track header) {
+                        <th
+                          [class.summary-col-client]="header === '客户公司名' || header === '终端客户/服务对象'"
+                          [class.summary-col-id]="header === '项目ID' || header === '合同编号' || header === '发票编号'"
+                          [class.summary-col-quo]="header === '报价单编号'"
+                          [class.summary-col-date]="header === '报价日期' || header === '合同日期' || header === '发票日期' || header === '到期日'"
+                          [class.summary-col-amount]="header === '报价金额' || header === '合同金额' || header === '目标金额' || header === '发票张数' || header === '发票总金额' || header === '发票应付金额' || header === '未开票金额' || header === '小计' || header === 'VAT金额' || header === '应付金额'"
+                          [class.summary-col-project]="header === '项目内容/服务名称' || header === '项目描述' || header === '匹配备注' || header === '源文件' || header === '项目/行项目说明' || header === '匹配说明'"
+                          [class.summary-col-type]="header === '合作类型/期限'"
+                          [class.summary-col-signer]="header === '负责人/联系人' || header === '服务方签署人' || header === '客户签署人'"
+                          [class.summary-col-status]="header === '状态'"
+                        >
+                          {{ header }}
+                        </th>
+                      }
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @if (projectSummaryCount() === 0) {
+                      <tr>
+                        <td class="summary-empty-cell" [attr.colspan]="projectSummaryHeaders().length || 1">当前项目里还没有可显示的{{ currentDetailSectionLabel() }}。</td>
+                      </tr>
+                    } @else {
+                      @for (record of paginatedProjectSummaryRows(); track record.rowId) {
+                        <tr>
+                          @for (cell of record.row; track $index) {
+                            <td
+                              class="summary-selectable-cell"
+                              [class.summary-cell-wrap]="projectSummaryShouldWrap($index)"
+                              [class.summary-hover-cell]="!projectSummaryIsStatusColumn($index)"
+                              [class.selected-grid-cell]="isProjectSummaryCellSelected(record.rowId, $index)"
+                              [ngStyle]="projectSummaryCellDisplayStyle(record.rowId, record.row, $index)"
+                              (click)="selectProjectSummaryCell(record.rowId, $index); startProjectSummaryInlineEdit(record.rowId, $index, cell)"
+                            >
+                              @if (projectSummaryIsStatusColumn($index)) {
+                                @if (isEditingProjectSummaryCell(record.rowId, $index)) {
+                                  <input
+                                    class="inline-edit-input"
+                                    [ngModel]="editingProjectSummaryValue()"
+                                    (ngModelChange)="updateProjectSummaryInlineEditValue($event)"
+                                    (blur)="saveProjectSummaryInlineEdit(record.rowId, $index)"
+                                    (keydown.enter)="saveProjectSummaryInlineEdit(record.rowId, $index)"
+                                    (keydown.escape)="cancelProjectSummaryInlineEdit()"
+                                    autofocus
+                                  >
+                                } @else {
+                                  <span
+                                    class="mini-chip summary-hover-text"
+                                    [ngClass]="projectSummaryStatusClass(cell)"
+                                    [attr.data-fulltext]="cell"
+                                  >
+                                    {{ cell }}
+                                  </span>
+                                }
+                              } @else {
+                                @if (isEditingProjectSummaryCell(record.rowId, $index)) {
+                                  <input
+                                    class="inline-edit-input"
+                                    [ngModel]="editingProjectSummaryValue()"
+                                    (ngModelChange)="updateProjectSummaryInlineEditValue($event)"
+                                    (blur)="saveProjectSummaryInlineEdit(record.rowId, $index)"
+                                    (keydown.enter)="saveProjectSummaryInlineEdit(record.rowId, $index)"
+                                    (keydown.escape)="cancelProjectSummaryInlineEdit()"
+                                    autofocus
+                                  >
+                                } @else {
+                                  <div
+                                    class="summary-cell-clamp"
+                                    [class.summary-cell-clamp-single-line]="projectSummaryClampLines() === 1"
+                                    [title]="cell"
+                                  >
+                                    {{ cell }}
+                                  </div>
+                                  <div class="summary-hover-popup">{{ cell }}</div>
+                                }
+                              }
+                            </td>
+                          }
+                        </tr>
+                      }
+                    }
+                  </tbody>
+              </table>
+            </div>
+          }
+          <div class="pagination-bar">
+            <span class="pagination-summary">共 {{ filteredProjectSummaryRows().length }} 条，每页 15 条</span>
+            <div class="pagination-actions">
+              <button class="secondary-button" [disabled]="currentSummaryPage() <= 1" (click)="goToProjectSummaryPage(currentSummaryPage() - 1)">上一页</button>
+              <span class="pagination-page">第 {{ currentSummaryPage() }} / {{ projectSummaryTotalPages() }} 页</span>
+              <button class="secondary-button" [disabled]="currentSummaryPage() >= projectSummaryTotalPages()" (click)="goToProjectSummaryPage(currentSummaryPage() + 1)">下一页</button>
+            </div>
+          </div>
+        }
       } @else {
         <section class="drive-panel">
           @if (driveLoading()) {
@@ -737,131 +1041,152 @@
             <div class="modal-header">
               <div>
                 <h2>{{ editingProjectId() ? '编辑项目' : '新增项目' }}</h2>
-                <p>{{ editingProjectId() ? '修改后会立即更新当前公司的项目表格。' : '新增后会立即显示在当前公司的项目表格中。' }}</p>
+                <p>
+                  @if (currentSection() === 'invoices' || currentSection() === 'invoice-details') {
+                    新增后会立即显示在当前公司的{{ currentDetailSectionLabel() }}中。
+                  } @else {
+                    {{ editingProjectId() ? '修改后会立即更新当前公司的项目表格。' : '新增后会立即显示在当前公司的项目表格中。' }}
+                  }
+                </p>
               </div>
               <button class="icon-close" (click)="closeAddModal()">关闭</button>
             </div>
 
-            <div class="modal-grid">
-              <label>
-                <span>客户公司</span>
-                <input [(ngModel)]="newProject.clientCompany" name="newProjectClientCompany" type="text" placeholder="例如：ABC Holdings Ltd">
-              </label>
+            @if (currentSection() === 'invoices' || currentSection() === 'invoice-details') {
+              <div class="modal-grid">
+                @for (field of projectSummaryFieldRows(); track field.header) {
+                  <label [class.full-width]="field.isLongText">
+                    <span>{{ field.header }}</span>
+                    @if (field.isLongText) {
+                      <textarea [(ngModel)]="newProjectSummary[field.header]" [name]="'summaryField' + $index" rows="4" [placeholder]="'输入' + field.header"></textarea>
+                    } @else {
+                      <input [(ngModel)]="newProjectSummary[field.header]" [name]="'summaryField' + $index" type="text" [placeholder]="'输入' + field.header">
+                    }
+                  </label>
+                }
+              </div>
+            } @else {
+              <div class="modal-grid">
+                <label>
+                  <span>客户公司</span>
+                  <input [(ngModel)]="newProject.clientCompany" name="newProjectClientCompany" type="text" placeholder="例如：ABC Holdings Ltd">
+                </label>
 
-              <label>
-                <span>QUO 编号</span>
-                <input [(ngModel)]="newProject.quoNumber" name="newProjectQuoNumber" type="text" placeholder="例如：QUO-2026-001">
-              </label>
+                <label>
+                  <span>QUO 编号</span>
+                  <input [(ngModel)]="newProject.quoNumber" name="newProjectQuoNumber" type="text" placeholder="例如：QUO-2026-001">
+                </label>
 
-              <label>
-                <span>QUO 状态</span>
-                <select [(ngModel)]="newProject.quoStatus" name="newProjectQuoStatus">
-                  <option value="草稿">草稿</option>
-                  <option value="已发送">已发送</option>
-                  <option value="已批准">已批准</option>
-                  <option value="已拒绝">已拒绝</option>
-                </select>
-              </label>
+                <label>
+                  <span>QUO 状态</span>
+                  <select [(ngModel)]="newProject.quoStatus" name="newProjectQuoStatus">
+                    <option value="草稿">草稿</option>
+                    <option value="已发送">已发送</option>
+                    <option value="已批准">已批准</option>
+                    <option value="已拒绝">已拒绝</option>
+                  </select>
+                </label>
 
-              <label>
-                <span>MSA 编号</span>
-                <input [(ngModel)]="newProject.msaNumber" name="newProjectMsaNumber" type="text" placeholder="例如：MSA-2026-001">
-              </label>
+                <label>
+                  <span>MSA 编号</span>
+                  <input [(ngModel)]="newProject.msaNumber" name="newProjectMsaNumber" type="text" placeholder="例如：MSA-2026-001">
+                </label>
 
-              <label>
-                <span>MSA 状态</span>
-                <select [(ngModel)]="newProject.msaStatus" name="newProjectMsaStatus">
-                  <option value="未开始">未开始</option>
-                  <option value="处理中">处理中</option>
-                  <option value="已签署">已签署</option>
-                  <option value="已终止">已终止</option>
-                </select>
-              </label>
+                <label>
+                  <span>MSA 状态</span>
+                  <select [(ngModel)]="newProject.msaStatus" name="newProjectMsaStatus">
+                    <option value="未开始">未开始</option>
+                    <option value="处理中">处理中</option>
+                    <option value="已签署">已签署</option>
+                    <option value="已终止">已终止</option>
+                  </select>
+                </label>
 
-              <label>
-                <span>日期</span>
-                <input [(ngModel)]="newProject.date" name="newProjectDate" type="date">
-              </label>
+                <label>
+                  <span>日期</span>
+                  <input [(ngModel)]="newProject.date" name="newProjectDate" type="date">
+                </label>
 
-              <label>
-                <span>金额 (GBP)</span>
-                <input [(ngModel)]="newProject.amountGbp" name="newProjectAmountGbp" type="text" placeholder="例如：12500">
-              </label>
+                <label>
+                  <span>金额 (GBP)</span>
+                  <input [(ngModel)]="newProject.amountGbp" name="newProjectAmountGbp" type="text" placeholder="例如：12500">
+                </label>
 
-              <label>
-                <span>关联发票</span>
-                <input [(ngModel)]="newProject.relatedInvoice" name="newProjectRelatedInvoice" type="text" placeholder="例如：INV-2026-014">
-              </label>
+                <label>
+                  <span>关联发票</span>
+                  <input [(ngModel)]="newProject.relatedInvoice" name="newProjectRelatedInvoice" type="text" placeholder="例如：INV-2026-014">
+                </label>
 
-              <label>
-                <span>one-off/ Phase-based</span>
-                <select [(ngModel)]="newProject.engagementType" name="newProjectEngagementType">
-                  <option value="one-off">one-off</option>
-                  <option value="phase-based">phase-based</option>
-                </select>
-              </label>
+                <label>
+                  <span>one-off/ Phase-based</span>
+                  <select [(ngModel)]="newProject.engagementType" name="newProjectEngagementType">
+                    <option value="one-off">one-off</option>
+                    <option value="phase-based">phase-based</option>
+                  </select>
+                </label>
 
-              <label>
-                <span>开始日期</span>
-                <input [(ngModel)]="newProject.startDate" name="newProjectStartDate" type="date">
-              </label>
+                <label>
+                  <span>开始日期</span>
+                  <input [(ngModel)]="newProject.startDate" name="newProjectStartDate" type="date">
+                </label>
 
-              <label>
-                <span>交付日期</span>
-                <input [(ngModel)]="newProject.deliveryDate" name="newProjectDeliveryDate" type="date">
-              </label>
+                <label>
+                  <span>交付日期</span>
+                  <input [(ngModel)]="newProject.deliveryDate" name="newProjectDeliveryDate" type="date">
+                </label>
 
-              <label>
-                <span>one-off 完成状态</span>
-                <select [(ngModel)]="newProject.completionStatus" name="newProjectCompletionStatus">
-                  <option value="进行中">进行中</option>
-                  <option value="待开始">待开始</option>
-                  <option value="已完成">已完成</option>
-                </select>
-              </label>
+                <label>
+                  <span>one-off 完成状态</span>
+                  <select [(ngModel)]="newProject.completionStatus" name="newProjectCompletionStatus">
+                    <option value="进行中">进行中</option>
+                    <option value="待开始">待开始</option>
+                    <option value="已完成">已完成</option>
+                  </select>
+                </label>
 
-              <label>
-                <span>Phase 1 完成状态</span>
-                <select [(ngModel)]="newProject.phase1Status" name="newProjectPhase1Status">
-                  <option value="待开始">待开始</option>
-                  <option value="进行中">进行中</option>
-                  <option value="已完成">已完成</option>
-                </select>
-              </label>
+                <label>
+                  <span>Phase 1 完成状态</span>
+                  <select [(ngModel)]="newProject.phase1Status" name="newProjectPhase1Status">
+                    <option value="待开始">待开始</option>
+                    <option value="进行中">进行中</option>
+                    <option value="已完成">已完成</option>
+                  </select>
+                </label>
 
-              <label>
-                <span>Phase 2 完成状态</span>
-                <select [(ngModel)]="newProject.phase2Status" name="newProjectPhase2Status">
-                  <option value="待开始">待开始</option>
-                  <option value="进行中">进行中</option>
-                  <option value="已完成">已完成</option>
-                </select>
-              </label>
+                <label>
+                  <span>Phase 2 完成状态</span>
+                  <select [(ngModel)]="newProject.phase2Status" name="newProjectPhase2Status">
+                    <option value="待开始">待开始</option>
+                    <option value="进行中">进行中</option>
+                    <option value="已完成">已完成</option>
+                  </select>
+                </label>
 
-              <label>
-                <span>Phase 3 完成状态</span>
-                <select [(ngModel)]="newProject.phase3Status" name="newProjectPhase3Status">
-                  <option value="待开始">待开始</option>
-                  <option value="进行中">进行中</option>
-                  <option value="已完成">已完成</option>
-                </select>
-              </label>
+                <label>
+                  <span>Phase 3 完成状态</span>
+                  <select [(ngModel)]="newProject.phase3Status" name="newProjectPhase3Status">
+                    <option value="待开始">待开始</option>
+                    <option value="进行中">进行中</option>
+                    <option value="已完成">已完成</option>
+                  </select>
+                </label>
 
-              <label>
-                <span>跟进人（MSA签署人）</span>
-                <input [(ngModel)]="newProject.msaSigner" name="newProjectMsaSigner" type="text" placeholder="例如：Calvin Leung">
-              </label>
+                <label>
+                  <span>跟进人（MSA签署人）</span>
+                  <input [(ngModel)]="newProject.msaSigner" name="newProjectMsaSigner" type="text" placeholder="例如：Calvin Leung">
+                </label>
 
-              <label class="full-width">
-                <span>备注</span>
-                <textarea [(ngModel)]="newProject.note" name="newProjectNote" rows="3" placeholder="补充说明、备注信息"></textarea>
-              </label>
+                <label class="full-width">
+                  <span>备注</span>
+                  <textarea [(ngModel)]="newProject.note" name="newProjectNote" rows="3" placeholder="补充说明、备注信息"></textarea>
+                </label>
 
-              <label class="full-width">
-                <span>交付内容</span>
-                <textarea [(ngModel)]="newProject.deliverables" name="newProjectDeliverables" rows="4" placeholder="输入交付内容"></textarea>
-              </label>
-            </div>
+                <label class="full-width">
+                  <span>交付内容</span>
+                  <textarea [(ngModel)]="newProject.deliverables" name="newProjectDeliverables" rows="4" placeholder="输入交付内容"></textarea>
+                </label>
+              </div>
+            }
 
             @if (addProjectError()) {
               <div class="error-box form-error">{{ addProjectError() }}</div>
@@ -869,7 +1194,7 @@
 
             <div class="modal-actions">
               <button class="secondary-button" (click)="closeAddModal()">取消</button>
-              <button class="primary-button" (click)="addProject()">保存项目</button>
+              <button class="primary-button" (click)="currentSection() === 'invoices' || currentSection() === 'invoice-details' ? addProjectSummaryRow() : addProject()">保存项目</button>
             </div>
           </section>
         </div>

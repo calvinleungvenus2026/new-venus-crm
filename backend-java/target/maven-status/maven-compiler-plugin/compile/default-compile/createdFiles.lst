@@ -1,8 +1,10 @@
 com/venuscrm/api/CrmServer$HeaderMapping.class
+com/venuscrm/api/CrmServer$ProjectSummaryCellSaveHandler.class
 com/venuscrm/api/CrmServer$ProjectRowsHandler.class
 com/venuscrm/api/CrmServer$SeedAccount.class
 com/venuscrm/api/CrmServer$DriveFolderHandler.class
 com/venuscrm/api/CrmServer$ServiceAccountCredentials.class
+com/venuscrm/api/CrmServer$ProjectSummaryCellOverride.class
 com/venuscrm/api/CrmServer.class
 com/venuscrm/api/CrmServer$AuthenticatedSession.class
 com/venuscrm/api/CrmServer$Account.class
@@ -12,6 +14,7 @@ com/venuscrm/api/CrmServer$SalesProjectRow.class
 com/venuscrm/api/CrmServer$SessionRecord.class
 com/venuscrm/api/CrmServer$DriveSalesProjectsHandler.class
 com/venuscrm/api/CrmServer$DriveEntry.class
+com/venuscrm/api/CrmServer$ProjectSummaryHandler.class
 com/venuscrm/api/CrmServer$UnauthorizedException.class
 com/venuscrm/api/CrmServer$WorkbookSheetRef.class
 com/venuscrm/api/CrmServer$ForbiddenException.class
@@ -21,6 +24,7 @@ com/venuscrm/api/CrmServer$Company.class
 com/venuscrm/api/CrmServer$ProjectRowsSaveHandler.class
 com/venuscrm/api/CrmServer$WorkbookSheet.class
 com/venuscrm/api/CrmServer$ProjectsHandler.class
+com/venuscrm/api/CrmServer$ProjectSummaryAddRowHandler.class
 com/venuscrm/api/CrmServer$ProjectRowsSyncHandler.class
 com/venuscrm/api/CrmServer$LogoutHandler.class
 com/venuscrm/api/CrmServer$LoginHandler.class
@@ -29,4 +33,5 @@ com/venuscrm/api/CrmServer$ProjectRow.class
 com/venuscrm/api/CrmServer$AppConfig.class
 com/venuscrm/api/CrmServer$SwitchCompanyHandler.class
 com/venuscrm/api/CrmServer$ProjectRowsDeleteHandler.class
+com/venuscrm/api/CrmServer$ProjectSummaryCustomRow.class
 com/venuscrm/api/CrmServer$ConfigurationException.class

@@ -72,6 +72,10 @@ interface NewProjectForm {
   completionStatus: string;
 }
 
+interface NewProjectSummaryForm {
+  [header: string]: string;
+}
+
 interface ProjectFileRecord {
   id: string;
   name: string;
@@ -110,6 +114,12 @@ interface DriveFolderResponse {
 
 interface ProjectRowDbPayload extends ProjectRow {
   companyId?: string;
+}
+
+interface ProjectSummaryResponse {
+  headers: string[];
+  rowIds: string[];
+  rows: string[][];
 }
 
 interface DashboardCompanySummary {
@@ -198,6 +208,12 @@ interface CellFormat {
   numberFormat?: 'plain' | 'currency' | 'percent' | 'decimal1' | 'decimal2';
 }
 
+interface DisplayCellStyle {
+  'font-weight'?: string | null;
+  color?: string | null;
+  'background-color'?: string | null;
+}
+
 type EditableProjectField =
   | 'clientCompany'
   | 'quoNumber'
@@ -223,6 +239,42 @@ type EditableProjectField =
   styleUrl: './app.component.css'
 })
 export class AppComponent {
+  readonly defaultProjectSummaryHeaders = [
+    '客户公司名',
+    '项目ID',
+    '终端客户/服务对象',
+    '报价单编号',
+    '报价日期',
+    '报价金额',
+    '合同编号',
+    '合同日期',
+    '合同金额',
+    '目标金额',
+    '项目内容/服务名称',
+    '项目描述',
+    '合作类型/期限',
+    '发票编号',
+    '发票日期',
+    '发票金额',
+    '发票状态',
+    '匹配备注',
+    '源文件'
+  ] as const;
+  readonly defaultInvoiceDetailsHeaders = [
+    '客户公司名',
+    '匹配项目ID',
+    '发票编号',
+    '发票日期',
+    '到期日',
+    '小计',
+    'VAT金额',
+    '发票总额',
+    '应付金额',
+    '项目/行项目说明',
+    '匹配说明',
+    '源文件'
+  ] as const;
+
   private readonly http = inject(HttpClient);
   private readonly storageKey = 'venus-crm-angular-auth';
   private readonly resetMarkerKey = 'venus-crm-data-reset-v1';
@@ -235,14 +287,22 @@ export class AppComponent {
   submitting = signal(false);
   session = signal<SessionResponse | null>(null);
   selectedCompanyId = signal('');
-  currentSection = signal<'dashboard' | 'projects' | 'drive'>('dashboard');
+  currentSection = signal<'dashboard' | 'projects' | 'invoices' | 'invoice-details' | 'drive'>('dashboard');
   statusFilter = signal('筛选');
   searchTerm = signal('');
   sortDirection = signal<'asc' | 'desc'>('asc');
   projectViewMode = signal<'table' | 'grid'>('table');
+  projectSummaryViewMode = signal<'table' | 'grid'>('table');
   showProjectSearch = signal(false);
   showProjectFilter = signal(false);
+  showProjectSummarySearch = signal(false);
+  showProjectSummaryFilter = signal(false);
+  showProjectSummaryFormatToolbar = signal(false);
+  projectSummarySearchTerm = signal('');
+  projectSummaryStatusFilter = signal('筛选');
+  projectSummaryClampLines = signal<1 | 2>(2);
   currentProjectPage = signal(1);
+  currentSummaryPage = signal(1);
   currentDrivePage = signal(1);
   projects = signal<ProjectRow[]>([]);
   projectsLoading = signal(false);
@@ -259,11 +319,21 @@ export class AppComponent {
   driveFiles = signal<DriveItem[]>([]);
   driveLoading = signal(false);
   driveError = signal('');
+  projectSummaryHeaders = signal<string[]>([]);
+  projectSummaryRowIds = signal<string[]>([]);
+  projectSummaryRowsData = signal<string[][]>([]);
+  projectSummaryCellStyles = signal<Record<string, CellFormat>>({});
+  projectSummaryLoading = signal(false);
+  projectSummaryError = signal('');
   newProject: NewProjectForm = this.createEmptyProjectForm();
+  newProjectSummary: NewProjectSummaryForm = {};
   selectedPhaseProject = signal<ProjectRow | null>(null);
   editingCell = signal<{ rowId: number; field: EditableProjectField } | null>(null);
   editingValue = signal('');
   selectedCell = signal<{ rowId: number; field: EditableProjectField } | null>(null);
+  selectedProjectSummaryCell = signal<{ rowKey: string; colIndex: number } | null>(null);
+  editingProjectSummaryCell = signal<{ rowId: string; colIndex: number } | null>(null);
+  editingProjectSummaryValue = signal('');
   showFormatToolbar = signal(false);
   readonly fontFamilies = ['Arial', 'Helvetica', 'Georgia', 'Times New Roman', 'Courier New'];
   readonly projectFilterOptions = [
@@ -318,6 +388,11 @@ export class AppComponent {
     this.currentProjectPage.set(1);
   }
 
+  onProjectSummarySearchChange(value: string) {
+    this.projectSummarySearchTerm.set(value);
+    this.currentSummaryPage.set(1);
+  }
+
   toggleProjectSearch() {
     const nextOpen = !this.showProjectSearch();
     this.resetProjectToolbarState(nextOpen ? 'search' : 'none');
@@ -328,6 +403,24 @@ export class AppComponent {
     const nextOpen = !this.showProjectFilter();
     this.resetProjectToolbarState(nextOpen ? 'filter' : 'none');
     this.showProjectFilter.set(nextOpen);
+  }
+
+  toggleProjectSummarySearch() {
+    const nextOpen = !this.showProjectSummarySearch();
+    this.resetProjectSummaryToolbarState(nextOpen ? 'search' : 'none');
+    this.showProjectSummarySearch.set(nextOpen);
+  }
+
+  toggleProjectSummaryFilter() {
+    const nextOpen = !this.showProjectSummaryFilter();
+    this.resetProjectSummaryToolbarState(nextOpen ? 'filter' : 'none');
+    this.showProjectSummaryFilter.set(nextOpen);
+  }
+
+  onProjectSummaryStatusChange(value: string) {
+    this.projectSummaryStatusFilter.set(value);
+    this.showProjectSummaryFilter.set(false);
+    this.currentSummaryPage.set(1);
   }
 
   onCompanyChange(value: string) {
@@ -345,6 +438,7 @@ export class AppComponent {
           this.setAuthenticatedSession(response);
           this.loadDashboardData();
           this.loadProjects();
+          this.loadProjectSummary();
           this.loadDriveFiles();
         },
         error: () => {
@@ -364,6 +458,34 @@ export class AppComponent {
   showProjectsSection() {
     this.currentSection.set('projects');
     this.currentProjectPage.set(1);
+  }
+
+  showInvoicesSection() {
+    this.currentSection.set('invoices');
+    this.currentSummaryPage.set(1);
+    this.loadProjectSummary();
+  }
+
+  showInvoiceDetailsSection() {
+    this.currentSection.set('invoice-details');
+    this.currentSummaryPage.set(1);
+    this.loadProjectSummary();
+  }
+
+  setProjectSummaryViewMode(mode: 'table' | 'grid') {
+    this.resetProjectSummaryToolbarState(mode === 'grid' ? 'grid' : 'none');
+    this.projectSummaryViewMode.set(mode);
+    if (mode !== 'table') {
+      this.showProjectSummaryFormatToolbar.set(false);
+    }
+  }
+
+  toggleProjectSummaryGridView() {
+    if (this.projectSummaryViewMode() === 'grid') {
+      this.setProjectSummaryViewMode('table');
+      return;
+    }
+    this.setProjectSummaryViewMode('grid');
   }
 
   setProjectViewMode(mode: 'table' | 'grid') {
@@ -406,6 +528,7 @@ export class AppComponent {
           this.submitting.set(false);
           this.loadDashboardData();
           this.loadProjects();
+          this.loadProjectSummary();
           this.loadDriveFiles();
         },
         error: () => {
@@ -427,6 +550,7 @@ export class AppComponent {
   openAddModal() {
     this.resetProjectToolbarState('none');
     this.newProject = this.createEmptyProjectForm();
+    this.newProjectSummary = this.createEmptyProjectSummaryForm();
     this.addProjectError.set('');
     this.editingProjectId.set(null);
     this.editingProjectSource.set(null);
@@ -521,6 +645,39 @@ export class AppComponent {
         },
         error: () => {
           this.addProjectError.set('项目保存失败，请确认数据库与 Java backend 正在运行。');
+        }
+      });
+  }
+
+  addProjectSummaryRow() {
+    const currentSession = this.session();
+    if (!currentSession) return;
+
+    const rowValues = this.projectSummaryColumns().map((header) => (this.newProjectSummary[header] || '').trim());
+    if (rowValues.every((value) => value.length === 0)) {
+      this.addProjectError.set(`请至少填写一项${this.currentDetailSectionLabel()}内容。`);
+      return;
+    }
+
+    this.http
+      .post<{ ok: boolean; rowId: string }>(
+        `${this.apiBaseUrl}/api/project-summary/add-row`,
+        {
+          companyId: currentSession.company.id,
+          sheetName: this.currentDetailSheetName(),
+          rowJson: JSON.stringify(rowValues)
+        },
+        this.authOptions()
+      )
+      .subscribe({
+        next: (response) => {
+          this.projectSummaryRowIds.set([...this.projectSummaryRowIds(), response.rowId]);
+          this.projectSummaryRowsData.set([...this.projectSummaryRowsData(), rowValues]);
+          this.currentSummaryPage.set(this.projectSummaryTotalPages());
+          this.closeAddModal();
+        },
+        error: () => {
+          this.addProjectError.set(`${this.currentDetailSectionLabel()}新增失败，请确认数据库与 Java backend 正在运行。`);
         }
       });
   }
@@ -651,6 +808,140 @@ export class AppComponent {
     this.toggleFormatToolbar();
   }
 
+  toggleProjectSummaryFormat() {
+    if (this.showProjectSummaryFormatToolbar()) {
+      this.resetProjectSummaryToolbarState('none');
+      this.showProjectSummaryFormatToolbar.set(false);
+      return;
+    }
+
+    this.projectSummaryViewMode.set('table');
+    this.resetProjectSummaryToolbarState('format');
+    this.showProjectSummaryFormatToolbar.set(true);
+  }
+
+  setProjectSummaryClampLines(lines: 1 | 2) {
+    this.projectSummaryClampLines.set(lines);
+  }
+
+  selectProjectSummaryCell(rowKey: string, colIndex: number) {
+    this.selectedProjectSummaryCell.set({ rowKey, colIndex });
+  }
+
+  startProjectSummaryInlineEdit(rowId: string, colIndex: number, value: string) {
+    this.selectedProjectSummaryCell.set({ rowKey: rowId, colIndex });
+    this.editingProjectSummaryCell.set({ rowId, colIndex });
+    this.editingProjectSummaryValue.set(value || '');
+  }
+
+  updateProjectSummaryInlineEditValue(value: string) {
+    this.editingProjectSummaryValue.set(value);
+  }
+
+  isEditingProjectSummaryCell(rowId: string, colIndex: number) {
+    const cell = this.editingProjectSummaryCell();
+    return cell?.rowId === rowId && cell.colIndex === colIndex;
+  }
+
+  cancelProjectSummaryInlineEdit() {
+    this.editingProjectSummaryCell.set(null);
+    this.editingProjectSummaryValue.set('');
+  }
+
+  saveProjectSummaryInlineEdit(rowId: string, colIndex: number) {
+    const nextValue = this.editingProjectSummaryValue();
+    this.cancelProjectSummaryInlineEdit();
+    this.saveProjectSummaryCell(rowId, colIndex, nextValue);
+  }
+
+  isProjectSummaryCellSelected(rowKey: string, colIndex: number) {
+    const selected = this.selectedProjectSummaryCell();
+    return selected?.rowKey === rowKey && selected.colIndex === colIndex;
+  }
+
+  projectSummarySelectedCellFormat() {
+    const selected = this.selectedProjectSummaryCell();
+    if (!selected) {
+      return null;
+    }
+
+    return this.projectSummaryCellStyles()[this.projectSummaryCellStyleKey(selected.rowKey, selected.colIndex)] || null;
+  }
+
+  projectSummarySelectedCellLabel() {
+    const selected = this.selectedProjectSummaryCell();
+    if (!selected) {
+      return '未选择单元格';
+    }
+
+    return this.projectSummaryHeaders()[selected.colIndex] || '未命名列';
+  }
+
+  setProjectSummarySelectedCellFontFamily(value: string) {
+    this.updateProjectSummarySelectedCellFormat({ fontFamily: value });
+  }
+
+  setProjectSummarySelectedCellFontSize(value: number) {
+    this.updateProjectSummarySelectedCellFormat({ fontSize: value });
+  }
+
+  adjustProjectSummarySelectedCellFontSize(delta: number) {
+    const currentSize = this.projectSummarySelectedCellFormat()?.fontSize || 13;
+    this.updateProjectSummarySelectedCellFormat({ fontSize: Math.max(8, Math.min(48, currentSize + delta)) });
+  }
+
+  toggleProjectSummarySelectedCellMark(mark: 'bold' | 'italic' | 'underline' | 'strikethrough') {
+    const current = this.projectSummarySelectedCellFormat();
+    this.updateProjectSummarySelectedCellFormat({ [mark]: !current?.[mark] } as Partial<CellFormat>);
+  }
+
+  setProjectSummarySelectedCellTextColor(value: string) {
+    this.updateProjectSummarySelectedCellFormat({ textColor: value });
+  }
+
+  setProjectSummarySelectedCellBackgroundColor(value: string) {
+    this.updateProjectSummarySelectedCellFormat({ backgroundColor: value });
+  }
+
+  setProjectSummarySelectedCellTextAlign(value: 'left' | 'center' | 'right') {
+    this.updateProjectSummarySelectedCellFormat({ textAlign: value });
+  }
+
+  clearProjectSummarySelectedCellFormat() {
+    const selected = this.selectedProjectSummaryCell();
+    if (!selected) {
+      return;
+    }
+
+    const nextStyles = { ...this.projectSummaryCellStyles() };
+    delete nextStyles[this.projectSummaryCellStyleKey(selected.rowKey, selected.colIndex)];
+    this.projectSummaryCellStyles.set(nextStyles);
+  }
+
+  projectSummaryCellDisplayStyle(rowKey: string, row: string[], colIndex: number) {
+    const format = this.projectSummaryCellStyles()[this.projectSummaryCellStyleKey(rowKey, colIndex)] || {};
+    const autoStyle = this.projectSummaryAutoCellStyle(row, colIndex);
+
+    return {
+      ...autoStyle,
+      'font-family': format.fontFamily || null,
+      'font-size.px': format.fontSize || null,
+      'font-weight': format.bold ? '700' : autoStyle['font-weight'] || null,
+      'font-style': format.italic ? 'italic' : null,
+      'text-decoration': [
+        format.underline ? 'underline' : '',
+        format.strikethrough ? 'line-through' : ''
+      ].filter(Boolean).join(' ') || null,
+      color: format.textColor || autoStyle.color || null,
+      'background-color': format.backgroundColor || autoStyle['background-color'] || null,
+      'text-align': format.textAlign || null
+    };
+  }
+
+  projectSummaryRowKey(item: string[], rowIndex: number) {
+    return item[1]?.trim() || `${rowIndex}-${item[0] || 'row'}`;
+  }
+
   private resetProjectToolbarState(active: 'search' | 'grid' | 'format' | 'filter' | 'none') {
     if (active !== 'search') {
       this.showProjectSearch.set(false);
@@ -671,6 +962,46 @@ export class AppComponent {
       this.statusFilter.set('筛选');
       this.showProjectFilter.set(false);
     }
+  }
+
+  private resetProjectSummaryToolbarState(active: 'search' | 'grid' | 'format' | 'filter' | 'none') {
+    if (active !== 'search') {
+      this.showProjectSummarySearch.set(false);
+      this.projectSummarySearchTerm.set('');
+    }
+
+    if (active !== 'grid' && active !== 'search') {
+      this.projectSummaryViewMode.set('table');
+    }
+
+    if (active !== 'format') {
+      this.showProjectSummaryFormatToolbar.set(false);
+    }
+
+    if (active !== 'filter') {
+      this.projectSummaryStatusFilter.set('筛选');
+      this.showProjectSummaryFilter.set(false);
+    }
+  }
+
+  private projectSummaryCellStyleKey(rowKey: string, colIndex: number) {
+    return `${rowKey}::${colIndex}`;
+  }
+
+  private updateProjectSummarySelectedCellFormat(patch: Partial<CellFormat>) {
+    const selected = this.selectedProjectSummaryCell();
+    if (!selected) {
+      return;
+    }
+
+    const key = this.projectSummaryCellStyleKey(selected.rowKey, selected.colIndex);
+    this.projectSummaryCellStyles.set({
+      ...this.projectSummaryCellStyles(),
+      [key]: {
+        ...(this.projectSummaryCellStyles()[key] || {}),
+        ...patch
+      }
+    });
   }
 
   selectCell(row: ProjectRow, field: EditableProjectField) {
@@ -1239,6 +1570,160 @@ export class AppComponent {
       } satisfies DashboardActivityItem));
   }
 
+  projectSummaryRows() {
+    return this.projectSummaryRowsData();
+  }
+
+  projectSummaryRecords() {
+    return this.projectSummaryRows().map((row, index) => ({
+      rowId: this.projectSummaryRowIds()[index] || String(index + 2),
+      row
+    }));
+  }
+
+  filteredProjectSummaryRows() {
+    const normalizedSearch = this.projectSummarySearchTerm().trim().toLowerCase();
+    const statusFilter = this.projectSummaryStatusFilter();
+    const statusColumnIndex = this.projectSummaryStatusColumnIndex();
+
+    return this.projectSummaryRecords().filter(({ row }) => {
+      const matchesStatus = statusFilter === '筛选'
+        || statusColumnIndex < 0
+        || row[statusColumnIndex] === statusFilter;
+      const searchableValues = row.join(' ').toLowerCase();
+      const matchesSearch = normalizedSearch.length === 0 || searchableValues.includes(normalizedSearch);
+      return matchesStatus && matchesSearch;
+    });
+  }
+
+  projectSummaryCount() {
+    return this.filteredProjectSummaryRows().length;
+  }
+
+  projectSummaryInvoicedCount() {
+    const invoiceNumberIndex = this.projectSummaryColumnIndex('发票编号');
+    if (invoiceNumberIndex < 0) {
+      return 0;
+    }
+    return this.projectSummaryRows().filter((row) => (row[invoiceNumberIndex] || '').trim().length > 0).length;
+  }
+
+  projectSummaryTargetAmount() {
+    const amountIndex = this.projectSummaryFirstColumnIndex(['目标金额', '应付金额', '发票总额']);
+    if (amountIndex < 0) {
+      return 0;
+    }
+    return this.projectSummaryRows().reduce((sum, row) => sum + this.parseAmount(row[amountIndex]), 0);
+  }
+
+  projectSummaryUninvoicedAmount() {
+    const amountIndex = this.projectSummaryColumnIndex('未开票金额');
+    if (amountIndex < 0) {
+      return 0;
+    }
+    return this.projectSummaryRows().reduce((sum, row) => sum + this.parseAmount(row[amountIndex]), 0);
+  }
+
+  projectSummaryStatusClass(value: string) {
+    if (value === '发票金额匹配') {
+      return 'dashboard-status-positive';
+    }
+
+    if (value === '部分开票') {
+      return 'dashboard-status-warning';
+    }
+
+    if (value === '未见发票') {
+      return 'dashboard-status-negative';
+    }
+
+    return 'dashboard-status-neutral';
+  }
+
+  projectSummaryGridStatusValue(row: string[]) {
+    const statusColumnIndex = this.projectSummaryStatusColumnIndex();
+    return statusColumnIndex >= 0 ? (row[statusColumnIndex] || '') : '';
+  }
+
+  projectSummaryShouldWrap(columnIndex: number) {
+    const header = this.projectSummaryHeaders()[columnIndex] || '';
+    return ['项目内容/服务名称', '项目描述', '合作类型/期限', '匹配备注', '源文件', '项目/行项目说明', '匹配说明'].includes(header);
+  }
+
+  projectSummaryIsStatusColumn(columnIndex: number) {
+    return (this.projectSummaryHeaders()[columnIndex] || '') === '状态';
+  }
+
+  currentDetailHasStatusColumn() {
+    return this.projectSummaryStatusColumnIndex() >= 0;
+  }
+
+  paginatedProjectSummaryRows() {
+    const rows = this.filteredProjectSummaryRows();
+    const totalPages = this.projectSummaryTotalPages();
+    const safePage = Math.min(this.currentSummaryPage(), totalPages);
+    if (safePage !== this.currentSummaryPage()) {
+      this.currentSummaryPage.set(safePage);
+    }
+    const start = (safePage - 1) * this.pageSize;
+    return rows.slice(start, start + this.pageSize);
+  }
+
+  loadProjectSummary() {
+    const currentSession = this.session();
+    if (!currentSession) {
+      this.projectSummaryHeaders.set([]);
+      this.projectSummaryRowIds.set([]);
+      this.projectSummaryRowsData.set([]);
+      this.projectSummaryError.set('');
+      return;
+    }
+
+    this.projectSummaryLoading.set(true);
+    this.projectSummaryError.set('');
+
+    this.http
+      .get<ProjectSummaryResponse>(
+        `${this.apiBaseUrl}/api/project-summary?companyId=${encodeURIComponent(currentSession.company.id)}&sheetName=${encodeURIComponent(this.currentDetailSheetName())}`,
+        this.authOptions()
+      )
+      .subscribe({
+        next: (response) => {
+          this.projectSummaryHeaders.set(response.headers?.length ? response.headers : this.defaultDetailHeaders());
+          this.projectSummaryRowIds.set(response.rowIds || []);
+          this.projectSummaryRowsData.set(response.rows || []);
+          this.projectSummaryLoading.set(false);
+          this.currentSummaryPage.set(1);
+        },
+        error: () => {
+          this.projectSummaryHeaders.set([]);
+          this.projectSummaryRowIds.set([]);
+          this.projectSummaryRowsData.set([]);
+          this.projectSummaryLoading.set(false);
+          this.projectSummaryError.set(`${this.currentDetailSectionLabel()}读取失败，请确认 Google Drive 文件和 Java backend 正在运行。`);
+        }
+      });
+  }
+
+  projectSummaryTotalPages() {
+    return Math.max(1, Math.ceil(this.filteredProjectSummaryRows().length / this.pageSize));
+  }
+
+  goToProjectSummaryPage(page: number) {
+    this.currentSummaryPage.set(Math.min(Math.max(1, page), this.projectSummaryTotalPages()));
+  }
+
+  projectSummaryFilterOptions() {
+    const statuses = new Set<string>();
+    const statusColumnIndex = this.projectSummaryStatusColumnIndex();
+    for (const row of this.projectSummaryRows()) {
+      if (statusColumnIndex >= 0 && row[statusColumnIndex]?.trim()) {
+        statuses.add(row[statusColumnIndex].trim());
+      }
+    }
+    return ['筛选', ...statuses];
+  }
+
   dashboardTotalProjects() {
     return this.dashboardRows().length;
   }
@@ -1482,6 +1967,52 @@ export class AppComponent {
       });
   }
 
+  private saveProjectSummaryCell(rowId: string, columnIndex: number, value: string) {
+    const currentSession = this.session();
+    if (!currentSession) {
+      return;
+    }
+
+    const rowIndex = this.projectSummaryRowIds().findIndex((item) => item === rowId);
+    if (rowIndex < 0) {
+      return;
+    }
+
+    const currentRow = this.projectSummaryRowsData()[rowIndex] || [];
+    if ((currentRow[columnIndex] || '') === value) {
+      return;
+    }
+
+    const nextRows = this.projectSummaryRowsData().map((row, index) => {
+      if (index !== rowIndex) {
+        return row;
+      }
+      const nextRow = [...row];
+      nextRow[columnIndex] = value;
+      return nextRow;
+    });
+    this.projectSummaryRowsData.set(nextRows);
+
+    this.http
+      .post(
+        `${this.apiBaseUrl}/api/project-summary/save-cell`,
+        {
+          companyId: currentSession.company.id,
+          sheetName: this.currentDetailSheetName(),
+          rowId,
+          columnIndex,
+          value
+        },
+        this.authOptions()
+      )
+      .subscribe({
+        error: () => {
+          this.projectSummaryError.set(`${this.currentDetailSectionLabel()}单元格保存失败，请确认数据库与 Java backend 正在运行。`);
+          this.loadProjectSummary();
+        }
+      });
+  }
+
   private loadDashboardData() {
     const currentSession = this.session();
     if (!currentSession) {
@@ -1550,6 +2081,41 @@ export class AppComponent {
 
   private normalizeStatus(value: string) {
     return (value || '').trim().toLowerCase();
+  }
+
+  private projectSummaryAutoCellStyle(row: string[], colIndex: number) {
+    const header = this.projectSummaryHeaders()[colIndex] || '';
+    const cellValue = row[colIndex] || '';
+    const dateStyle = this.projectSummaryDateAlertStyle(header, cellValue);
+
+    return dateStyle || {};
+  }
+
+  private projectSummaryDateAlertStyle(header: string, value: string): DisplayCellStyle | null {
+    const dateHeaders = new Set(['报价日期', '合同日期', '发票日期', '开始日期', '交付日期', '到期日']);
+    if (!dateHeaders.has(header)) {
+      return null;
+    }
+
+    const date = this.parseDate(value);
+    if (!date) {
+      return null;
+    }
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const diffDays = Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (diffDays >= 0 && diffDays <= 7) {
+      return {
+        color: '#b91c1c',
+        'background-color': '#fee2e2',
+        'font-weight': '700'
+      };
+    }
+
+    return null;
   }
 
   private parseDate(value?: string) {
@@ -1660,6 +2226,59 @@ export class AppComponent {
     };
   }
 
+  private createEmptyProjectSummaryForm(): NewProjectSummaryForm {
+    const values: NewProjectSummaryForm = {};
+    for (const header of this.projectSummaryColumns()) {
+      values[header] = '';
+    }
+    return values;
+  }
+
+  projectSummaryColumns() {
+    return this.projectSummaryHeaders().length > 0
+      ? this.projectSummaryHeaders()
+      : this.defaultDetailHeaders();
+  }
+
+  projectSummaryFieldRows() {
+    return this.projectSummaryColumns().map((header) => ({
+      header,
+      isLongText: ['项目内容/服务名称', '项目描述', '匹配备注', '源文件', '项目/行项目说明', '匹配说明'].includes(header)
+    }));
+  }
+
+  currentDetailSheetName() {
+    return this.currentSection() === 'invoice-details' ? '发票明细' : '项目汇总';
+  }
+
+  currentDetailSectionLabel() {
+    return this.currentSection() === 'invoice-details' ? '发票明细' : '项目汇总';
+  }
+
+  private defaultDetailHeaders() {
+    return this.currentSection() === 'invoice-details'
+      ? [...this.defaultInvoiceDetailsHeaders]
+      : [...this.defaultProjectSummaryHeaders];
+  }
+
+  private projectSummaryColumnIndex(headerName: string) {
+    return this.projectSummaryHeaders().findIndex((header) => header === headerName);
+  }
+
+  private projectSummaryFirstColumnIndex(headerNames: string[]) {
+    for (const headerName of headerNames) {
+      const index = this.projectSummaryColumnIndex(headerName);
+      if (index >= 0) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  private projectSummaryStatusColumnIndex() {
+    return this.projectSummaryColumnIndex('状态');
+  }
+
   private clearAllStoredProjectDataOnce() {
     if (localStorage.getItem(this.resetMarkerKey) === 'done') {
       return;
@@ -1674,6 +2293,7 @@ export class AppComponent {
         this.setAuthenticatedSession(response);
         this.loadDashboardData();
         this.loadProjects();
+        this.loadProjectSummary();
         this.loadDriveFiles();
       },
       error: () => {
@@ -1698,6 +2318,9 @@ export class AppComponent {
     this.dashboardRows.set([]);
     this.dashboardError.set('');
     this.projects.set([]);
+    this.projectSummaryHeaders.set([]);
+    this.projectSummaryRowsData.set([]);
+    this.projectSummaryError.set('');
     this.driveFiles.set([]);
     this.driveError.set('');
     this.error.set('');

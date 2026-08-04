@@ -64,6 +64,8 @@ public final class CrmServer {
     private static final Pattern JSON_STRING_PATTERN_TEMPLATE =
         Pattern.compile("\"%s\"\\s*:\\s*\"((?:\\\\.|[^\\\\\"])*)\"", Pattern.DOTALL);
     private static final String XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    private static final String PROJECT_SUMMARY_SHEET_NAME = "项目汇总";
+    private static final String DEFAULT_MOMENTUM_PROJECT_SUMMARY_DRIVE_FILE_NAME = "MGA_Project_Information_Summary.xlsx";
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final int SESSION_DURATION_DAYS = 30;
     private static final int PASSWORD_ITERATIONS = 65_536;
@@ -120,6 +122,9 @@ public final class CrmServer {
         server.createContext("/api/projects", new ProjectsHandler());
         server.createContext("/api/drive/folder", new DriveFolderHandler());
         server.createContext("/api/drive/sales-projects", new DriveSalesProjectsHandler());
+        server.createContext("/api/project-summary", new ProjectSummaryHandler());
+        server.createContext("/api/project-summary/add-row", new ProjectSummaryAddRowHandler());
+        server.createContext("/api/project-summary/save-cell", new ProjectSummaryCellSaveHandler());
         server.createContext("/api/project-rows", new ProjectRowsHandler());
         server.createContext("/api/project-rows/sync", new ProjectRowsSyncHandler());
         server.createContext("/api/project-rows/save", new ProjectRowsSaveHandler());
@@ -450,6 +455,97 @@ public final class CrmServer {
         }
     }
 
+    private static final class ProjectSummaryHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (handlePreflight(exchange)) {
+                return;
+            }
+            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                respondJson(exchange, 405, "{\"error\":\"Method Not Allowed\"}");
+                return;
+            }
+
+            Map<String, String> queryParams = parseQuery(exchange.getRequestURI());
+            String companyId = queryParams.get("companyId");
+            if (companyId == null || companyId.isBlank()) {
+                respondJson(exchange, 400, "{\"error\":\"Missing companyId\"}");
+                return;
+            }
+
+            try {
+                AuthenticatedSession auth = requireSession(exchange);
+                ensureCompanyAccess(auth, companyId);
+                String sheetName = defaultIfBlank(queryParams.get("sheetName"), PROJECT_SUMMARY_SHEET_NAME);
+                respondJson(exchange, 200, loadProjectSummaryJson(companyId, sheetName));
+            } catch (ConfigurationException error) {
+                respondJson(exchange, 500, "{\"error\":\"" + escape(error.getMessage()) + "\"}");
+            } catch (UnauthorizedException error) {
+                respondJson(exchange, 401, "{\"error\":\"Unauthorized\"}");
+            } catch (ForbiddenException error) {
+                respondJson(exchange, 403, "{\"error\":\"Forbidden\"}");
+            } catch (Exception error) {
+                respondJson(exchange, 502, "{\"error\":\"Failed to load project summary\",\"details\":\"" + escape(error.getMessage()) + "\"}");
+            }
+        }
+    }
+
+    private static final class ProjectSummaryCellSaveHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (handlePreflight(exchange)) {
+                return;
+            }
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                respondJson(exchange, 405, "{\"error\":\"Method Not Allowed\"}");
+                return;
+            }
+
+            try {
+                AuthenticatedSession auth = requireSession(exchange);
+                String body = readBody(exchange.getRequestBody());
+                ProjectSummaryCellOverride override = parseProjectSummaryCellOverride(body);
+                ensureCompanyAccess(auth, override.companyId());
+                saveProjectSummaryCellOverride(override);
+                respondJson(exchange, 200, "{\"ok\":true}");
+            } catch (UnauthorizedException error) {
+                respondJson(exchange, 401, "{\"error\":\"Unauthorized\"}");
+            } catch (ForbiddenException error) {
+                respondJson(exchange, 403, "{\"error\":\"Forbidden\"}");
+            } catch (Exception error) {
+                respondJson(exchange, 500, "{\"error\":\"Failed to save project summary cell\",\"details\":\"" + escape(error.getMessage()) + "\"}");
+            }
+        }
+    }
+
+    private static final class ProjectSummaryAddRowHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (handlePreflight(exchange)) {
+                return;
+            }
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                respondJson(exchange, 405, "{\"error\":\"Method Not Allowed\"}");
+                return;
+            }
+
+            try {
+                AuthenticatedSession auth = requireSession(exchange);
+                String body = readBody(exchange.getRequestBody());
+                ProjectSummaryCustomRow row = parseProjectSummaryCustomRow(body);
+                ensureCompanyAccess(auth, row.companyId());
+                ProjectSummaryCustomRow saved = saveProjectSummaryCustomRow(row);
+                respondJson(exchange, 200, "{\"ok\":true,\"rowId\":\"" + escape(saved.rowId()) + "\"}");
+            } catch (UnauthorizedException error) {
+                respondJson(exchange, 401, "{\"error\":\"Unauthorized\"}");
+            } catch (ForbiddenException error) {
+                respondJson(exchange, 403, "{\"error\":\"Forbidden\"}");
+            } catch (Exception error) {
+                respondJson(exchange, 500, "{\"error\":\"Failed to add project summary row\",\"details\":\"" + escape(error.getMessage()) + "\"}");
+            }
+        }
+    }
+
     private static final class ProjectRowsSyncHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
@@ -716,6 +812,150 @@ public final class CrmServer {
         } finally {
             Files.deleteIfExists(tempWorkbook);
         }
+    }
+
+    private static String loadProjectSummaryJson(String companyId, String sheetName) throws Exception {
+        AppConfig config = AppConfig.load();
+        String workbookPath = config.projectSummaryWorkbookPathForCompany(companyId);
+        if (workbookPath != null && !workbookPath.isBlank()) {
+            return workbookSheetToJson(companyId, loadWorkbook(Path.of(workbookPath)), sheetName);
+        }
+
+        String driveFileId = config.projectSummaryDriveWorkbookFileIdForCompany(companyId);
+        String driveFileName = config.projectSummaryDriveWorkbookFileNameForCompany(companyId);
+        String folderId = config.folderIdForCompany(companyId);
+        if ((driveFileName == null || driveFileName.isBlank()) && "momentum-growth".equals(companyId)) {
+            driveFileName = DEFAULT_MOMENTUM_PROJECT_SUMMARY_DRIVE_FILE_NAME;
+        }
+
+        if (driveFileId != null && !driveFileId.isBlank()) {
+            ServiceAccountCredentials credentials = ServiceAccountCredentials.fromFile(config.serviceAccountJsonPath());
+            String accessToken = requestDriveAccessToken(credentials);
+            DriveEntry workbookEntry = fetchDriveFileById(accessToken, driveFileId);
+            Path tempWorkbook = downloadDriveFileToTemp(accessToken, workbookEntry);
+            try {
+                return workbookSheetToJson(companyId, loadWorkbook(tempWorkbook), sheetName);
+            } finally {
+                Files.deleteIfExists(tempWorkbook);
+            }
+        }
+
+        if (driveFileName != null && !driveFileName.isBlank()) {
+            if (folderId == null || folderId.isBlank()) {
+                throw new IOException("No Google Drive folder configured for companyId: " + companyId);
+            }
+            ServiceAccountCredentials credentials = ServiceAccountCredentials.fromFile(config.serviceAccountJsonPath());
+            String accessToken = requestDriveAccessToken(credentials);
+            DriveEntry workbookEntry = fetchDriveFileByName(accessToken, driveFileName, folderId);
+            Path tempWorkbook = downloadDriveFileToTemp(accessToken, workbookEntry);
+            try {
+                return workbookSheetToJson(companyId, loadWorkbook(tempWorkbook), sheetName);
+            } finally {
+                Files.deleteIfExists(tempWorkbook);
+            }
+        }
+
+        String crmWorkbookPath = config.workbookPathForCompany(companyId);
+        if (crmWorkbookPath != null && !crmWorkbookPath.isBlank()) {
+            return workbookSheetToJson(companyId, loadWorkbook(Path.of(crmWorkbookPath)), sheetName);
+        }
+
+        String crmDriveFileId = config.driveWorkbookFileIdForCompany(companyId);
+        if (crmDriveFileId != null && !crmDriveFileId.isBlank()) {
+            ServiceAccountCredentials credentials = ServiceAccountCredentials.fromFile(config.serviceAccountJsonPath());
+            String accessToken = requestDriveAccessToken(credentials);
+            DriveEntry workbookEntry = fetchDriveFileById(accessToken, crmDriveFileId);
+            Path tempWorkbook = downloadDriveFileToTemp(accessToken, workbookEntry);
+            try {
+                return workbookSheetToJson(companyId, loadWorkbook(tempWorkbook), sheetName);
+            } finally {
+                Files.deleteIfExists(tempWorkbook);
+            }
+        }
+
+        String crmDriveFileName = config.driveWorkbookFileNameForCompany(companyId);
+        if (crmDriveFileName != null && !crmDriveFileName.isBlank()) {
+            if (folderId == null || folderId.isBlank()) {
+                throw new IOException("No Google Drive folder configured for companyId: " + companyId);
+            }
+            ServiceAccountCredentials credentials = ServiceAccountCredentials.fromFile(config.serviceAccountJsonPath());
+            String accessToken = requestDriveAccessToken(credentials);
+            DriveEntry workbookEntry = fetchDriveFileByName(accessToken, crmDriveFileName, folderId);
+            Path tempWorkbook = downloadDriveFileToTemp(accessToken, workbookEntry);
+            try {
+                return workbookSheetToJson(companyId, loadWorkbook(tempWorkbook), sheetName);
+            } finally {
+                Files.deleteIfExists(tempWorkbook);
+            }
+        }
+
+        throw new IOException("No workbook source configured for project summary: " + companyId);
+    }
+
+    private static String workbookSheetToJson(String companyId, WorkbookData workbook, String sheetName) throws Exception {
+        WorkbookSheet sheet = findWorkbookSheetByName(workbook.sheets(), sheetName);
+        if (sheet == null) {
+            throw new IOException("Workbook sheet not found: " + sheetName);
+        }
+        List<List<String>> rows = sheet.rows();
+        if (rows.isEmpty()) {
+            return "{\"headers\":[],\"rows\":[]}";
+        }
+
+        List<String> headers = rows.get(0);
+        List<List<String>> dataRows = new ArrayList<>();
+        List<String> rowIds = new ArrayList<>();
+        Map<String, ProjectSummaryCellOverride> overridesByKey = loadProjectSummaryCellOverrides(companyId, sheetName);
+        for (int index = 1; index < rows.size(); index += 1) {
+            List<String> row = normalizeWorkbookRow(rows.get(index), headers.size());
+            if (row.stream().allMatch(String::isBlank)) {
+                continue;
+            }
+            String rowId = String.valueOf(index + 1);
+            for (int columnIndex = 0; columnIndex < row.size(); columnIndex += 1) {
+                ProjectSummaryCellOverride override = overridesByKey.get(projectSummaryCellKey(rowId, columnIndex));
+                if (override != null) {
+                    row.set(columnIndex, override.cellValue());
+                }
+            }
+            rowIds.add(rowId);
+            dataRows.add(row);
+        }
+
+        for (ProjectSummaryCustomRow customRow : loadProjectSummaryCustomRows(companyId, sheetName, headers.size())) {
+            List<String> row = new ArrayList<>(customRow.values());
+            for (int columnIndex = 0; columnIndex < row.size(); columnIndex += 1) {
+                ProjectSummaryCellOverride override = overridesByKey.get(projectSummaryCellKey(customRow.rowId(), columnIndex));
+                if (override != null) {
+                    row.set(columnIndex, override.cellValue());
+                }
+            }
+            rowIds.add(customRow.rowId());
+            dataRows.add(row);
+        }
+
+        return "{"
+            + "\"headers\":" + toJsonArray(headers) + ","
+            + "\"rowIds\":" + toJsonArray(rowIds) + ","
+            + "\"rows\":" + toJsonMatrix(dataRows)
+            + "}";
+    }
+
+    private static WorkbookSheet findWorkbookSheetByName(List<WorkbookSheet> sheets, String sheetName) {
+        for (WorkbookSheet sheet : sheets) {
+            if (sheetName.equals(sheet.name())) {
+                return sheet;
+            }
+        }
+        return null;
+    }
+
+    private static List<String> normalizeWorkbookRow(List<String> row, int width) {
+        List<String> normalized = new ArrayList<>(width);
+        for (int index = 0; index < width; index += 1) {
+            normalized.add(index < row.size() ? row.get(index) : "");
+        }
+        return normalized;
     }
 
     private static WorkbookData loadWorkbook(Path workbookPath) throws Exception {
@@ -1133,6 +1373,146 @@ public final class CrmServer {
             && row.phase3Status().isBlank()
             && row.msaSigner().isBlank()
             && row.completionStatus().isBlank();
+    }
+
+    private static String projectSummaryCellKey(String rowId, int columnIndex) {
+        return rowId + ":" + columnIndex;
+    }
+
+    private static Map<String, ProjectSummaryCellOverride> loadProjectSummaryCellOverrides(String companyId, String sheetName) throws Exception {
+        String output = runMysqlQuery(
+            "SELECT row_id, column_index, cell_value FROM crm_project_summary_cell_overrides "
+                + "WHERE company_id = '" + sqlEscape(companyId) + "' "
+                + "AND sheet_name = '" + sqlEscape(sheetName) + "';"
+        );
+
+        Map<String, ProjectSummaryCellOverride> result = new HashMap<>();
+        if (output.isBlank()) {
+            return result;
+        }
+
+        for (String line : output.split("\n")) {
+            if (line.isBlank()) {
+                continue;
+            }
+            String[] parts = line.split("\t", -1);
+            if (parts.length < 3) {
+                continue;
+            }
+            ProjectSummaryCellOverride override = new ProjectSummaryCellOverride(
+                companyId,
+                sheetName,
+                parts[0],
+                parseInt(parts[1]),
+                parts[2]
+            );
+            result.put(projectSummaryCellKey(override.rowId(), override.columnIndex()), override);
+        }
+        return result;
+    }
+
+    private static List<ProjectSummaryCustomRow> loadProjectSummaryCustomRows(String companyId, String sheetName, int width) throws Exception {
+        String output = runMysqlQuery(
+            "SELECT row_id, row_json, row_order FROM crm_project_summary_custom_rows "
+                + "WHERE company_id = '" + sqlEscape(companyId) + "' "
+                + "AND sheet_name = '" + sqlEscape(sheetName) + "' "
+                + "ORDER BY row_order ASC, id ASC;"
+        );
+
+        List<ProjectSummaryCustomRow> result = new ArrayList<>();
+        if (output.isBlank()) {
+            return result;
+        }
+
+        for (String line : output.split("\n")) {
+            if (line.isBlank()) {
+                continue;
+            }
+            String[] parts = line.split("\t", -1);
+            if (parts.length < 3) {
+                continue;
+            }
+            result.add(new ProjectSummaryCustomRow(
+                companyId,
+                sheetName,
+                parts[0],
+                parseInt(parts[2]),
+                normalizeWorkbookRow(parseJsonStringArray(parts[1]), width)
+            ));
+        }
+        return result;
+    }
+
+    private static List<String> parseJsonStringArray(String json) {
+        List<String> values = new ArrayList<>();
+        if (json == null) {
+            return values;
+        }
+        String trimmed = json.trim();
+        if (trimmed.length() < 2 || trimmed.charAt(0) != '[' || trimmed.charAt(trimmed.length() - 1) != ']') {
+            return values;
+        }
+
+        int index = 1;
+        while (index < trimmed.length() - 1) {
+            while (index < trimmed.length() - 1 && Character.isWhitespace(trimmed.charAt(index))) {
+                index += 1;
+            }
+            if (index >= trimmed.length() - 1) {
+                break;
+            }
+            if (trimmed.charAt(index) == ',') {
+                index += 1;
+                continue;
+            }
+            if (trimmed.charAt(index) != '"') {
+                int nextComma = trimmed.indexOf(',', index);
+                if (nextComma < 0) {
+                    nextComma = trimmed.length() - 1;
+                }
+                values.add(trimmed.substring(index, nextComma).trim());
+                index = nextComma + 1;
+                continue;
+            }
+
+            StringBuilder builder = new StringBuilder();
+            index += 1;
+            boolean escaping = false;
+            while (index < trimmed.length() - 1) {
+                char current = trimmed.charAt(index);
+                if (escaping) {
+                    switch (current) {
+                        case '"' -> builder.append('"');
+                        case '\\' -> builder.append('\\');
+                        case '/' -> builder.append('/');
+                        case 'b' -> builder.append('\b');
+                        case 'f' -> builder.append('\f');
+                        case 'n' -> builder.append('\n');
+                        case 'r' -> builder.append('\r');
+                        case 't' -> builder.append('\t');
+                        case 'u' -> {
+                            if (index + 4 < trimmed.length() - 1) {
+                                String hex = trimmed.substring(index + 1, index + 5);
+                                builder.append((char) Integer.parseInt(hex, 16));
+                                index += 4;
+                            }
+                        }
+                        default -> builder.append(current);
+                    }
+                    escaping = false;
+                } else if (current == '\\') {
+                    escaping = true;
+                } else if (current == '"') {
+                    break;
+                } else {
+                    builder.append(current);
+                }
+                index += 1;
+            }
+            values.add(builder.toString());
+            index += 1;
+        }
+        return values;
     }
 
     private static String normalizeHeader(String value) {
@@ -1573,6 +1953,8 @@ public final class CrmServer {
         ensureSeedCompanies();
         ensureCrmProjectRowsSourceKeyColumn();
         ensureCrmProjectRowsPhaseStatusColumns();
+        ensureProjectSummaryCellOverridesTable();
+        ensureProjectSummaryCustomRowsTable();
         ensureCompaniesSortOrderColumn();
         ensureUsersSecurityColumns();
         seedAuthData();
@@ -1610,6 +1992,37 @@ public final class CrmServer {
         ensureCrmProjectRowsColumn("msa_signer", "VARCHAR(255) NOT NULL DEFAULT ''", "AFTER phase_3_status");
         ensureCrmProjectRowsColumn("note", "TEXT NOT NULL", "AFTER msa_signer");
         ensureCrmProjectRowsColumn("cell_style_json", "TEXT NOT NULL", "AFTER note");
+    }
+
+    private static void ensureProjectSummaryCellOverridesTable() throws Exception {
+        runMysqlUpdate("""
+            CREATE TABLE IF NOT EXISTS crm_project_summary_cell_overrides (
+                id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                company_id VARCHAR(64) NOT NULL,
+                sheet_name VARCHAR(128) NOT NULL,
+                row_id VARCHAR(64) NOT NULL,
+                column_index INT NOT NULL,
+                cell_value TEXT NOT NULL,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uk_project_summary_cell (company_id, sheet_name, row_id, column_index)
+            );
+            """);
+    }
+
+    private static void ensureProjectSummaryCustomRowsTable() throws Exception {
+        runMysqlUpdate("""
+            CREATE TABLE IF NOT EXISTS crm_project_summary_custom_rows (
+                id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                company_id VARCHAR(64) NOT NULL,
+                sheet_name VARCHAR(128) NOT NULL,
+                row_id VARCHAR(64) NOT NULL,
+                row_order INT NOT NULL DEFAULT 0,
+                row_json TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uk_project_summary_custom_row (company_id, sheet_name, row_id)
+            );
+            """);
     }
 
     private static void ensureCrmProjectRowsColumn(String columnName, String definition, String positionClause) throws Exception {
@@ -1911,6 +2324,44 @@ public final class CrmServer {
         return records;
     }
 
+    private static void saveProjectSummaryCellOverride(ProjectSummaryCellOverride override) throws Exception {
+        String sql = "INSERT INTO crm_project_summary_cell_overrides (company_id, sheet_name, row_id, column_index, cell_value) VALUES ("
+            + "'" + sqlEscape(override.companyId()) + "',"
+            + "'" + sqlEscape(override.sheetName()) + "',"
+            + "'" + sqlEscape(override.rowId()) + "',"
+            + override.columnIndex() + ","
+            + "'" + sqlEscape(override.cellValue()) + "'"
+            + ") ON DUPLICATE KEY UPDATE "
+            + "cell_value = VALUES(cell_value), "
+            + "updated_at = CURRENT_TIMESTAMP;";
+        runMysqlUpdate(sql);
+    }
+
+    private static ProjectSummaryCustomRow saveProjectSummaryCustomRow(ProjectSummaryCustomRow row) throws Exception {
+        String rowId = row.rowId().isBlank() ? "custom-" + System.currentTimeMillis() : row.rowId();
+        int rowOrder = row.rowOrder() > 0 ? row.rowOrder() : (int) (System.currentTimeMillis() / 1000L);
+        ProjectSummaryCustomRow normalized = new ProjectSummaryCustomRow(
+            row.companyId(),
+            row.sheetName(),
+            rowId,
+            rowOrder,
+            row.values()
+        );
+
+        String sql = "INSERT INTO crm_project_summary_custom_rows (company_id, sheet_name, row_id, row_order, row_json) VALUES ("
+            + "'" + sqlEscape(normalized.companyId()) + "',"
+            + "'" + sqlEscape(normalized.sheetName()) + "',"
+            + "'" + sqlEscape(normalized.rowId()) + "',"
+            + normalized.rowOrder() + ","
+            + "'" + sqlEscape(toJsonArray(normalized.values())) + "'"
+            + ") ON DUPLICATE KEY UPDATE "
+            + "row_order = VALUES(row_order), "
+            + "row_json = VALUES(row_json), "
+            + "updated_at = CURRENT_TIMESTAMP;";
+        runMysqlUpdate(sql);
+        return normalized;
+    }
+
     private static void saveProjectRowToDatabase(ProjectRowRecord row) throws Exception {
         String sourceKey = row.sourceKey().isBlank()
             ? computeSourceKey(row.companyId(), row.clientCompany(), row.quoNumber(), row.msaNumber())
@@ -2025,6 +2476,14 @@ public final class CrmServer {
         }
     }
 
+    private static int parseInt(String value) {
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (Exception error) {
+            return 0;
+        }
+    }
+
     private static String env(String key, String fallback) {
         String value = System.getenv(key);
         if (value == null || value.isBlank()) {
@@ -2121,6 +2580,26 @@ public final class CrmServer {
             nullToEmpty(extractJsonString(body, "note")),
             nullToEmpty(extractJsonString(body, "completionStatus")),
             nullToEmpty(extractJsonString(body, "cellStyleJson"))
+        );
+    }
+
+    private static ProjectSummaryCellOverride parseProjectSummaryCellOverride(String body) {
+        return new ProjectSummaryCellOverride(
+            nullToEmpty(extractJsonString(body, "companyId")),
+            defaultIfBlank(extractJsonString(body, "sheetName"), PROJECT_SUMMARY_SHEET_NAME),
+            nullToEmpty(extractJsonString(body, "rowId")),
+            parseInt(nullToEmpty(extractJsonNumber(body, "columnIndex"))),
+            nullToEmpty(extractJsonString(body, "value"))
+        );
+    }
+
+    private static ProjectSummaryCustomRow parseProjectSummaryCustomRow(String body) {
+        return new ProjectSummaryCustomRow(
+            nullToEmpty(extractJsonString(body, "companyId")),
+            defaultIfBlank(extractJsonString(body, "sheetName"), PROJECT_SUMMARY_SHEET_NAME),
+            nullToEmpty(extractJsonString(body, "rowId")),
+            parseInt(nullToEmpty(extractJsonNumber(body, "rowOrder"))),
+            parseJsonStringArray(defaultIfBlank(extractJsonString(body, "rowJson"), "[]"))
         );
     }
 
@@ -2299,6 +2778,10 @@ public final class CrmServer {
         return "[" + values.stream().map(value -> "\"" + escape(value) + "\"").reduce((a, b) -> a + "," + b).orElse("") + "]";
     }
 
+    private static String toJsonMatrix(List<List<String>> rows) {
+        return "[" + rows.stream().map(CrmServer::toJsonArray).reduce((a, b) -> a + "," + b).orElse("") + "]";
+    }
+
     private static List<String> splitList(String value) {
         List<String> values = new ArrayList<>();
         if (value == null || value.isBlank()) {
@@ -2474,6 +2957,24 @@ public final class CrmServer {
         }
     }
 
+    private record ProjectSummaryCellOverride(
+        String companyId,
+        String sheetName,
+        String rowId,
+        int columnIndex,
+        String cellValue
+    ) {
+    }
+
+    private record ProjectSummaryCustomRow(
+        String companyId,
+        String sheetName,
+        String rowId,
+        int rowOrder,
+        List<String> values
+    ) {
+    }
+
     private record DriveEntry(
         String id,
         String name,
@@ -2519,8 +3020,11 @@ public final class CrmServer {
     private record AppConfig(
         String serviceAccountJsonPath,
         Map<String, String> companyWorkbooks,
+        Map<String, String> companyProjectSummaryWorkbooks,
         Map<String, String> companyDriveWorkbookFileIds,
+        Map<String, String> companyProjectSummaryDriveWorkbookFileIds,
         Map<String, String> companyDriveWorkbookFileNames,
+        Map<String, String> companyProjectSummaryDriveWorkbookFileNames,
         Map<String, String> companyFolders
     ) {
         private static AppConfig load() throws IOException, ConfigurationException {
@@ -2541,6 +3045,9 @@ public final class CrmServer {
             putIfPresent(companyWorkbooks, "crestpoint-hr", env.get("CRESTPOINT_HR_CRM_XLSX_PATH"));
             putIfPresent(companyWorkbooks, "novasoft-tech", env.get("NOVASOFT_TECH_CRM_XLSX_PATH"));
 
+            Map<String, String> companyProjectSummaryWorkbooks = new HashMap<>();
+            putIfPresent(companyProjectSummaryWorkbooks, "momentum-growth", env.get("MOMENTUM_GROWTH_PROJECT_SUMMARY_XLSX_PATH"));
+
             Map<String, String> companyDriveWorkbookFileIds = new HashMap<>();
             putIfPresent(companyDriveWorkbookFileIds, "venus", env.get("VENUS_CRM_DRIVE_FILE_ID"));
             putIfPresent(companyDriveWorkbookFileIds, "trinity-property", env.get("TRINITY_PROPERTY_CRM_DRIVE_FILE_ID"));
@@ -2554,6 +3061,9 @@ public final class CrmServer {
             putIfPresent(companyDriveWorkbookFileIds, "crestpoint-hr", env.get("CRESTPOINT_HR_CRM_DRIVE_FILE_ID"));
             putIfPresent(companyDriveWorkbookFileIds, "novasoft-tech", env.get("NOVASOFT_TECH_CRM_DRIVE_FILE_ID"));
 
+            Map<String, String> companyProjectSummaryDriveWorkbookFileIds = new HashMap<>();
+            putIfPresent(companyProjectSummaryDriveWorkbookFileIds, "momentum-growth", env.get("MOMENTUM_GROWTH_PROJECT_SUMMARY_DRIVE_FILE_ID"));
+
             Map<String, String> companyDriveWorkbookFileNames = new HashMap<>();
             putIfPresent(companyDriveWorkbookFileNames, "venus", env.get("VENUS_CRM_DRIVE_FILE_NAME"));
             putIfPresent(companyDriveWorkbookFileNames, "trinity-property", env.get("TRINITY_PROPERTY_CRM_DRIVE_FILE_NAME"));
@@ -2566,6 +3076,9 @@ public final class CrmServer {
             putIfPresent(companyDriveWorkbookFileNames, "biocheck", env.get("BIOCHECK_CRM_DRIVE_FILE_NAME"));
             putIfPresent(companyDriveWorkbookFileNames, "crestpoint-hr", env.get("CRESTPOINT_HR_CRM_DRIVE_FILE_NAME"));
             putIfPresent(companyDriveWorkbookFileNames, "novasoft-tech", env.get("NOVASOFT_TECH_CRM_DRIVE_FILE_NAME"));
+
+            Map<String, String> companyProjectSummaryDriveWorkbookFileNames = new HashMap<>();
+            putIfPresent(companyProjectSummaryDriveWorkbookFileNames, "momentum-growth", env.get("MOMENTUM_GROWTH_PROJECT_SUMMARY_DRIVE_FILE_NAME"));
 
             if (companyWorkbooks.isEmpty()
                 && companyDriveWorkbookFileNames.isEmpty()
@@ -2586,19 +3099,40 @@ public final class CrmServer {
             putIfPresent(companyFolders, "crestpoint-hr", env.get("GOOGLE_DRIVE_CRESTPOINT_HR_FOLDER_ID"));
             putIfPresent(companyFolders, "novasoft-tech", env.get("GOOGLE_DRIVE_NOVASOFT_TECH_FOLDER_ID"));
 
-            return new AppConfig(serviceAccountJsonPath, companyWorkbooks, companyDriveWorkbookFileIds, companyDriveWorkbookFileNames, companyFolders);
+            return new AppConfig(
+                serviceAccountJsonPath,
+                companyWorkbooks,
+                companyProjectSummaryWorkbooks,
+                companyDriveWorkbookFileIds,
+                companyProjectSummaryDriveWorkbookFileIds,
+                companyDriveWorkbookFileNames,
+                companyProjectSummaryDriveWorkbookFileNames,
+                companyFolders
+            );
         }
 
         private String workbookPathForCompany(String companyId) {
             return companyWorkbooks.get(companyId);
         }
 
+        private String projectSummaryWorkbookPathForCompany(String companyId) {
+            return companyProjectSummaryWorkbooks.get(companyId);
+        }
+
         private String driveWorkbookFileNameForCompany(String companyId) {
             return companyDriveWorkbookFileNames.get(companyId);
         }
 
+        private String projectSummaryDriveWorkbookFileNameForCompany(String companyId) {
+            return companyProjectSummaryDriveWorkbookFileNames.get(companyId);
+        }
+
         private String driveWorkbookFileIdForCompany(String companyId) {
             return companyDriveWorkbookFileIds.get(companyId);
+        }
+
+        private String projectSummaryDriveWorkbookFileIdForCompany(String companyId) {
+            return companyProjectSummaryDriveWorkbookFileIds.get(companyId);
         }
 
         private String folderIdForCompany(String companyId) {
