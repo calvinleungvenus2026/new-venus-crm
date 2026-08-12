@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, inject, signal } from '@angular/core';
+import { Component, HostListener, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 interface Company {
@@ -120,6 +120,13 @@ interface ProjectSummaryResponse {
   headers: string[];
   rowIds: string[];
   rows: string[][];
+}
+
+interface CachedProjectSummary {
+  headers: string[];
+  rowIds: string[];
+  rows: string[][];
+  cachedAt: string;
 }
 
 interface DashboardCompanySummary {
@@ -278,8 +285,10 @@ export class AppComponent {
   private readonly http = inject(HttpClient);
   private readonly storageKey = 'venus-crm-angular-auth';
   private readonly resetMarkerKey = 'venus-crm-data-reset-v1';
+  private readonly projectSummaryCacheKey = 'venus-crm-project-summary-cache-v1';
   private readonly pageSize = 15;
   private readonly apiBaseUrl = this.resolveApiBaseUrl();
+  private projectSummaryRowDragBounds: Array<{ rowId: string; rowIndex: number; top: number; bottom: number }> = [];
 
   email = signal('admin-crm@venuslondontechnology.co.uk');
   password = signal('testtest123');
@@ -332,6 +341,20 @@ export class AppComponent {
   editingValue = signal('');
   selectedCell = signal<{ rowId: number; field: EditableProjectField } | null>(null);
   selectedProjectSummaryCell = signal<{ rowKey: string; colIndex: number } | null>(null);
+  selectedProjectSummaryRows = signal<string[]>([]);
+  projectSummaryRowSelectionAnchor = signal<string | null>(null);
+  projectSummaryRowDragActive = signal(false);
+  projectSummaryRowDragStart = signal<string | null>(null);
+  projectSummaryRowDragMoved = signal(false);
+  projectSummaryRowToggleCandidate = signal(false);
+  selectedProjectSummaryColumns = signal<number[]>([]);
+  projectSummaryColumnSelectionAnchor = signal<number | null>(null);
+  projectSummaryColumnDragActive = signal(false);
+  projectSummaryColumnDragStart = signal<number | null>(null);
+  projectSummaryColumnDragMoved = signal(false);
+  projectSummaryColumnToggleCandidate = signal(false);
+  suppressProjectSummaryCellClick = signal(false);
+  projectSummaryVisibleRowIds = signal<string[]>([]);
   editingProjectSummaryCell = signal<{ rowId: string; colIndex: number } | null>(null);
   editingProjectSummaryValue = signal('');
   showFormatToolbar = signal(false);
@@ -673,6 +696,7 @@ export class AppComponent {
         next: (response) => {
           this.projectSummaryRowIds.set([...this.projectSummaryRowIds(), response.rowId]);
           this.projectSummaryRowsData.set([...this.projectSummaryRowsData(), rowValues]);
+          this.persistCurrentProjectSummaryCache();
           this.currentSummaryPage.set(this.projectSummaryTotalPages());
           this.closeAddModal();
         },
@@ -825,7 +849,283 @@ export class AppComponent {
   }
 
   selectProjectSummaryCell(rowKey: string, colIndex: number) {
+    this.selectedProjectSummaryRows.set([]);
+    this.projectSummaryRowSelectionAnchor.set(null);
+    this.selectedProjectSummaryColumns.set([]);
+    this.projectSummaryColumnSelectionAnchor.set(null);
     this.selectedProjectSummaryCell.set({ rowKey, colIndex });
+  }
+
+  selectProjectSummaryRow(rowKey: string, event?: MouseEvent) {
+    this.cancelProjectSummaryInlineEdit();
+    this.selectedProjectSummaryCell.set(null);
+
+    const orderedRowIds = this.projectSummaryVisibleRowIds().length
+      ? this.projectSummaryVisibleRowIds()
+      : this.filteredProjectSummaryRows().map((record) => record.rowId);
+    const clickedIndex = orderedRowIds.indexOf(rowKey);
+    if (clickedIndex < 0) {
+      return;
+    }
+
+    const isToggleSelection = !!event && (event.metaKey || event.ctrlKey);
+    const isRangeSelection = !!event?.shiftKey;
+
+    if (isRangeSelection) {
+      this.selectedProjectSummaryColumns.set([]);
+      this.projectSummaryColumnSelectionAnchor.set(null);
+      const anchor = this.projectSummaryRowSelectionAnchor() || rowKey;
+      const anchorIndex = orderedRowIds.indexOf(anchor);
+      const rangeStart = Math.min(anchorIndex >= 0 ? anchorIndex : clickedIndex, clickedIndex);
+      const rangeEnd = Math.max(anchorIndex >= 0 ? anchorIndex : clickedIndex, clickedIndex);
+      const rangeIds = orderedRowIds.slice(rangeStart, rangeEnd + 1);
+      this.selectedProjectSummaryRows.set(rangeIds);
+      this.projectSummaryRowSelectionAnchor.set(anchorIndex >= 0 ? anchor : rowKey);
+      return;
+    }
+
+    if (isToggleSelection) {
+      this.selectedProjectSummaryColumns.set([]);
+      this.projectSummaryColumnSelectionAnchor.set(null);
+      const current = this.selectedProjectSummaryRows();
+      const next = current.includes(rowKey)
+        ? current.filter((item) => item !== rowKey)
+        : [...current, rowKey];
+      this.selectedProjectSummaryRows.set(next);
+      this.projectSummaryRowSelectionAnchor.set(rowKey);
+      return;
+    }
+
+    this.selectedProjectSummaryColumns.set([]);
+    this.projectSummaryColumnSelectionAnchor.set(null);
+    this.selectedProjectSummaryRows.set([rowKey]);
+    this.projectSummaryRowSelectionAnchor.set(rowKey);
+  }
+
+  selectProjectSummaryColumn(colIndex: number, event?: MouseEvent) {
+    this.cancelProjectSummaryInlineEdit();
+    this.selectedProjectSummaryCell.set(null);
+    this.selectedProjectSummaryRows.set([]);
+    this.projectSummaryRowSelectionAnchor.set(null);
+
+    const totalColumns = this.projectSummaryHeaders().length;
+    if (colIndex < 0 || colIndex >= totalColumns) {
+      return;
+    }
+
+    const isToggleSelection = !!event && (event.metaKey || event.ctrlKey);
+    const isRangeSelection = !!event?.shiftKey;
+
+    if (isRangeSelection) {
+      const anchor = this.projectSummaryColumnSelectionAnchor() ?? colIndex;
+      const rangeStart = Math.min(anchor, colIndex);
+      const rangeEnd = Math.max(anchor, colIndex);
+      this.selectedProjectSummaryColumns.set(Array.from({ length: rangeEnd - rangeStart + 1 }, (_, index) => rangeStart + index));
+      this.projectSummaryColumnSelectionAnchor.set(anchor);
+      return;
+    }
+
+    if (isToggleSelection) {
+      const current = this.selectedProjectSummaryColumns();
+      const next = current.includes(colIndex)
+        ? current.filter((item) => item !== colIndex)
+        : [...current, colIndex].sort((a, b) => a - b);
+      this.selectedProjectSummaryColumns.set(next);
+      this.projectSummaryColumnSelectionAnchor.set(colIndex);
+      return;
+    }
+
+    this.selectedProjectSummaryColumns.set([colIndex]);
+    this.projectSummaryColumnSelectionAnchor.set(colIndex);
+  }
+
+  beginProjectSummaryRowSelection(rowKey: string, event: MouseEvent) {
+    event.preventDefault();
+    window.getSelection()?.removeAllRanges();
+    this.selectedProjectSummaryColumns.set([]);
+    this.projectSummaryColumnSelectionAnchor.set(null);
+    this.projectSummaryVisibleRowIds.set(this.paginatedProjectSummaryRows().map((record) => record.rowId));
+    this.cacheProjectSummaryRowDragBounds();
+    const currentSelection = this.selectedProjectSummaryRows();
+    const canToggleOff = !event.shiftKey
+      && !event.metaKey
+      && !event.ctrlKey
+      && currentSelection.length === 1
+      && currentSelection[0] === rowKey;
+
+    this.projectSummaryRowDragActive.set(true);
+    this.projectSummaryRowDragStart.set(rowKey);
+    this.projectSummaryRowDragMoved.set(false);
+    this.projectSummaryRowToggleCandidate.set(canToggleOff);
+
+    if (canToggleOff) {
+      this.cancelProjectSummaryInlineEdit();
+      this.selectedProjectSummaryCell.set(null);
+      this.projectSummaryRowSelectionAnchor.set(rowKey);
+      return;
+    }
+
+    this.selectProjectSummaryRow(rowKey, event);
+  }
+
+  beginProjectSummaryColumnSelection(colIndex: number, event: MouseEvent) {
+    event.preventDefault();
+    window.getSelection()?.removeAllRanges();
+    const currentSelection = this.selectedProjectSummaryColumns();
+    const canToggleOff = !event.shiftKey
+      && !event.metaKey
+      && !event.ctrlKey
+      && currentSelection.length === 1
+      && currentSelection[0] === colIndex;
+
+    this.projectSummaryColumnDragActive.set(true);
+    this.projectSummaryColumnDragStart.set(colIndex);
+    this.projectSummaryColumnDragMoved.set(false);
+    this.projectSummaryColumnToggleCandidate.set(canToggleOff);
+
+    if (canToggleOff) {
+      this.cancelProjectSummaryInlineEdit();
+      this.selectedProjectSummaryCell.set(null);
+      this.projectSummaryColumnSelectionAnchor.set(colIndex);
+      return;
+    }
+
+    this.selectProjectSummaryColumn(colIndex, event);
+  }
+
+  extendProjectSummaryRowSelection(rowKey: string) {
+    if (!this.projectSummaryRowDragActive()) {
+      return;
+    }
+
+    const anchor = this.projectSummaryRowSelectionAnchor();
+    if (!anchor) {
+      return;
+    }
+
+    const orderedRowIds = this.projectSummaryVisibleRowIds().length
+      ? this.projectSummaryVisibleRowIds()
+      : this.filteredProjectSummaryRows().map((record) => record.rowId);
+    const anchorIndex = orderedRowIds.indexOf(anchor);
+    const currentIndex = orderedRowIds.indexOf(rowKey);
+    if (anchorIndex < 0 || currentIndex < 0) {
+      return;
+    }
+
+    if (this.projectSummaryRowDragStart() !== rowKey) {
+      this.projectSummaryRowDragMoved.set(true);
+      this.projectSummaryRowToggleCandidate.set(false);
+    }
+
+    const rangeStart = Math.min(anchorIndex, currentIndex);
+    const rangeEnd = Math.max(anchorIndex, currentIndex);
+    this.selectedProjectSummaryRows.set(orderedRowIds.slice(rangeStart, rangeEnd + 1));
+    window.getSelection()?.removeAllRanges();
+  }
+
+  extendProjectSummaryColumnSelection(colIndex: number) {
+    if (!this.projectSummaryColumnDragActive()) {
+      return;
+    }
+
+    const anchor = this.projectSummaryColumnSelectionAnchor();
+    const totalColumns = this.projectSummaryHeaders().length;
+    if (anchor === null || colIndex < 0 || colIndex >= totalColumns) {
+      return;
+    }
+
+    if (this.projectSummaryColumnDragStart() !== colIndex) {
+      this.projectSummaryColumnDragMoved.set(true);
+      this.projectSummaryColumnToggleCandidate.set(false);
+    }
+
+    const rangeStart = Math.min(anchor, colIndex);
+    const rangeEnd = Math.max(anchor, colIndex);
+    this.selectedProjectSummaryColumns.set(Array.from({ length: rangeEnd - rangeStart + 1 }, (_, index) => rangeStart + index));
+    window.getSelection()?.removeAllRanges();
+  }
+
+  handleProjectSummaryCellClick(rowId: string, colIndex: number, value: string) {
+    if (this.suppressProjectSummaryCellClick()) {
+      this.suppressProjectSummaryCellClick.set(false);
+      return;
+    }
+
+    this.selectProjectSummaryCell(rowId, colIndex);
+    this.startProjectSummaryInlineEdit(rowId, colIndex, value);
+  }
+
+  beginProjectSummaryRowSelectionFromCell(rowId: string, event: MouseEvent) {
+    if (!this.isProjectSummaryRowSelected(rowId)) {
+      return;
+    }
+
+    this.beginProjectSummaryRowSelection(rowId, event);
+  }
+
+  private cacheProjectSummaryRowDragBounds() {
+    const rows = Array.from(document.querySelectorAll('tr[data-summary-row-id][data-summary-row-index]')) as HTMLElement[];
+    this.projectSummaryRowDragBounds = rows
+      .map((row) => {
+        const rowId = row.getAttribute('data-summary-row-id');
+        const rowIndex = Number.parseInt(row.getAttribute('data-summary-row-index') || '-1', 10);
+        const rect = row.getBoundingClientRect();
+        if (!rowId || Number.isNaN(rowIndex)) {
+          return null;
+        }
+
+        return {
+          rowId,
+          rowIndex,
+          top: rect.top,
+          bottom: rect.bottom
+        };
+      })
+      .filter((row): row is { rowId: string; rowIndex: number; top: number; bottom: number } => !!row)
+      .sort((a, b) => a.rowIndex - b.rowIndex);
+  }
+
+  private projectSummaryRowIdFromClientY(clientY: number) {
+    if (!this.projectSummaryRowDragBounds.length) {
+      this.cacheProjectSummaryRowDragBounds();
+    }
+
+    if (!this.projectSummaryRowDragBounds.length) {
+      return null;
+    }
+
+    for (const row of this.projectSummaryRowDragBounds) {
+      if (clientY >= row.top && clientY <= row.bottom) {
+        return row.rowId;
+      }
+    }
+
+    const firstRow = this.projectSummaryRowDragBounds[0];
+    const lastRow = this.projectSummaryRowDragBounds[this.projectSummaryRowDragBounds.length - 1];
+
+    if (clientY < firstRow.top) {
+      return firstRow.rowId;
+    }
+
+    if (clientY > lastRow.bottom) {
+      return lastRow.rowId;
+    }
+
+    return null;
+  }
+
+  onProjectSummaryRowDragOverlayMove(event: MouseEvent) {
+    if (!this.projectSummaryRowDragActive()) {
+      return;
+    }
+
+    event.preventDefault();
+    const rowKey = this.projectSummaryRowIdFromClientY(event.clientY);
+    if (!rowKey) {
+      return;
+    }
+
+    this.extendProjectSummaryRowSelection(rowKey);
   }
 
   startProjectSummaryInlineEdit(rowId: string, colIndex: number, value: string) {
@@ -859,16 +1159,111 @@ export class AppComponent {
     return selected?.rowKey === rowKey && selected.colIndex === colIndex;
   }
 
+  isProjectSummaryRowSelected(rowKey: string) {
+    return this.selectedProjectSummaryRows().includes(rowKey);
+  }
+
+  isProjectSummaryColumnSelected(colIndex: number) {
+    return this.selectedProjectSummaryColumns().includes(colIndex);
+  }
+
+  @HostListener('document:mousemove', ['$event'])
+  onProjectSummaryRowSelectionDrag(event: MouseEvent) {
+    if (!this.projectSummaryRowDragActive()) {
+      return;
+    }
+
+    const rowKey = this.projectSummaryRowIdFromClientY(event.clientY);
+    if (!rowKey) {
+      return;
+    }
+
+    this.extendProjectSummaryRowSelection(rowKey);
+  }
+
+  @HostListener('document:mousemove', ['$event'])
+  onProjectSummaryColumnSelectionDrag(event: MouseEvent) {
+    if (!this.projectSummaryColumnDragActive()) {
+      return;
+    }
+
+    const elementUnderPointer = document.elementFromPoint(event.clientX, event.clientY);
+    if (!(elementUnderPointer instanceof HTMLElement)) {
+      return;
+    }
+
+    const cell = elementUnderPointer.closest('[data-summary-col-index]');
+    const colIndexValue = cell?.getAttribute('data-summary-col-index');
+    if (colIndexValue === null || colIndexValue === undefined) {
+      return;
+    }
+
+    const colIndex = Number.parseInt(colIndexValue, 10);
+    if (Number.isNaN(colIndex)) {
+      return;
+    }
+
+    this.extendProjectSummaryColumnSelection(colIndex);
+  }
+
+  @HostListener('document:mouseup')
+  endProjectSummaryRowSelection() {
+    let shouldSuppressCellClick = false;
+
+    if (this.projectSummaryRowDragActive() && this.projectSummaryRowToggleCandidate() && !this.projectSummaryRowDragMoved()) {
+      this.selectedProjectSummaryRows.set([]);
+      this.projectSummaryRowSelectionAnchor.set(null);
+    }
+
+    if (this.projectSummaryRowDragActive() && this.projectSummaryRowDragMoved()) {
+      shouldSuppressCellClick = true;
+    }
+
+    this.projectSummaryRowDragActive.set(false);
+    this.projectSummaryRowDragStart.set(null);
+    this.projectSummaryRowDragMoved.set(false);
+    this.projectSummaryRowToggleCandidate.set(false);
+    this.projectSummaryVisibleRowIds.set([]);
+    this.projectSummaryRowDragBounds = [];
+
+    if (this.projectSummaryColumnDragActive() && this.projectSummaryColumnToggleCandidate() && !this.projectSummaryColumnDragMoved()) {
+      this.selectedProjectSummaryColumns.set([]);
+      this.projectSummaryColumnSelectionAnchor.set(null);
+    }
+
+    if (this.projectSummaryColumnDragActive() && this.projectSummaryColumnDragMoved()) {
+      shouldSuppressCellClick = true;
+    }
+
+    this.projectSummaryColumnDragActive.set(false);
+    this.projectSummaryColumnDragStart.set(null);
+    this.projectSummaryColumnDragMoved.set(false);
+    this.projectSummaryColumnToggleCandidate.set(false);
+
+    this.suppressProjectSummaryCellClick.set(shouldSuppressCellClick);
+  }
+
   projectSummarySelectedCellFormat() {
-    const selected = this.selectedProjectSummaryCell();
-    if (!selected) {
+    const targets = this.projectSummaryFormatTargets();
+    if (!targets.length) {
       return null;
     }
 
-    return this.projectSummaryCellStyles()[this.projectSummaryCellStyleKey(selected.rowKey, selected.colIndex)] || null;
+    const firstTarget = targets[0];
+    return this.projectSummaryCellStyles()[this.projectSummaryCellStyleKey(firstTarget.rowKey, firstTarget.colIndex)] || null;
   }
 
   projectSummarySelectedCellLabel() {
+    const selectedRows = this.selectedProjectSummaryRows();
+    if (selectedRows.length > 0) {
+      return `已选择 ${selectedRows.length} 行`;
+    }
+
+    const selectedColumns = this.selectedProjectSummaryColumns();
+    if (selectedColumns.length > 0) {
+      return `已选择 ${selectedColumns.length} 列`;
+    }
+
     const selected = this.selectedProjectSummaryCell();
     if (!selected) {
       return '未选择单元格';
@@ -908,13 +1303,15 @@ export class AppComponent {
   }
 
   clearProjectSummarySelectedCellFormat() {
-    const selected = this.selectedProjectSummaryCell();
-    if (!selected) {
+    const targets = this.projectSummaryFormatTargets();
+    if (!targets.length) {
       return;
     }
 
     const nextStyles = { ...this.projectSummaryCellStyles() };
-    delete nextStyles[this.projectSummaryCellStyleKey(selected.rowKey, selected.colIndex)];
+    for (const target of targets) {
+      delete nextStyles[this.projectSummaryCellStyleKey(target.rowKey, target.colIndex)];
+    }
     this.projectSummaryCellStyles.set(nextStyles);
   }
 
@@ -988,20 +1385,42 @@ export class AppComponent {
     return `${rowKey}::${colIndex}`;
   }
 
+  private projectSummaryFormatTargets() {
+    const selectedRows = this.selectedProjectSummaryRows();
+    if (selectedRows.length > 0) {
+      const columnCount = this.projectSummaryHeaders().length;
+      return selectedRows.flatMap((rowKey) =>
+        Array.from({ length: columnCount }, (_, colIndex) => ({ rowKey, colIndex }))
+      );
+    }
+
+    const selectedColumns = this.selectedProjectSummaryColumns();
+    if (selectedColumns.length > 0) {
+      const visibleRowIds = this.paginatedProjectSummaryRows().map((record) => record.rowId);
+      return visibleRowIds.flatMap((rowKey) =>
+        selectedColumns.map((colIndex) => ({ rowKey, colIndex }))
+      );
+    }
+
+    const selectedCell = this.selectedProjectSummaryCell();
+    return selectedCell ? [selectedCell] : [];
+  }
+
   private updateProjectSummarySelectedCellFormat(patch: Partial<CellFormat>) {
-    const selected = this.selectedProjectSummaryCell();
-    if (!selected) {
+    const targets = this.projectSummaryFormatTargets();
+    if (!targets.length) {
       return;
     }
 
-    const key = this.projectSummaryCellStyleKey(selected.rowKey, selected.colIndex);
-    this.projectSummaryCellStyles.set({
-      ...this.projectSummaryCellStyles(),
-      [key]: {
-        ...(this.projectSummaryCellStyles()[key] || {}),
+    const nextStyles = { ...this.projectSummaryCellStyles() };
+    for (const target of targets) {
+      const key = this.projectSummaryCellStyleKey(target.rowKey, target.colIndex);
+      nextStyles[key] = {
+        ...(nextStyles[key] || {}),
         ...patch
       }
-    });
+    }
+    this.projectSummaryCellStyles.set(nextStyles);
   }
 
   selectCell(row: ProjectRow, field: EditableProjectField) {
@@ -1669,7 +2088,23 @@ export class AppComponent {
     return rows.slice(start, start + this.pageSize);
   }
 
-  loadProjectSummary() {
+  projectSummaryColumnLabel(columnIndex: number) {
+    let label = '';
+    let current = columnIndex;
+
+    do {
+      label = String.fromCharCode(65 + (current % 26)) + label;
+      current = Math.floor(current / 26) - 1;
+    } while (current >= 0);
+
+    return label;
+  }
+
+  projectSummaryRowNumber(rowIndex: number) {
+    return ((this.currentSummaryPage() - 1) * this.pageSize) + rowIndex + 1;
+  }
+
+  loadProjectSummary(forceRefresh = false) {
     const currentSession = this.session();
     if (!currentSession) {
       this.projectSummaryHeaders.set([]);
@@ -1677,6 +2112,16 @@ export class AppComponent {
       this.projectSummaryRowsData.set([]);
       this.projectSummaryError.set('');
       return;
+    }
+
+    if (!forceRefresh) {
+      const cached = this.readProjectSummaryCache(currentSession.company.id, this.currentDetailSheetName());
+      if (cached) {
+        this.applyProjectSummaryResponse(cached);
+        this.projectSummaryLoading.set(false);
+        this.projectSummaryError.set('');
+        return;
+      }
     }
 
     this.projectSummaryLoading.set(true);
@@ -1689,11 +2134,9 @@ export class AppComponent {
       )
       .subscribe({
         next: (response) => {
-          this.projectSummaryHeaders.set(response.headers?.length ? response.headers : this.defaultDetailHeaders());
-          this.projectSummaryRowIds.set(response.rowIds || []);
-          this.projectSummaryRowsData.set(response.rows || []);
+          this.applyProjectSummaryResponse(response);
+          this.writeProjectSummaryCache(currentSession.company.id, this.currentDetailSheetName(), response);
           this.projectSummaryLoading.set(false);
-          this.currentSummaryPage.set(1);
         },
         error: () => {
           this.projectSummaryHeaders.set([]);
@@ -1992,6 +2435,7 @@ export class AppComponent {
       return nextRow;
     });
     this.projectSummaryRowsData.set(nextRows);
+    this.persistCurrentProjectSummaryCache();
 
     this.http
       .post(
@@ -2008,7 +2452,7 @@ export class AppComponent {
       .subscribe({
         error: () => {
           this.projectSummaryError.set(`${this.currentDetailSectionLabel()}单元格保存失败，请确认数据库与 Java backend 正在运行。`);
-          this.loadProjectSummary();
+          this.loadProjectSummary(true);
         }
       });
   }
@@ -2287,6 +2731,76 @@ export class AppComponent {
     localStorage.setItem(this.resetMarkerKey, 'done');
   }
 
+  private applyProjectSummaryResponse(response: Pick<ProjectSummaryResponse, 'headers' | 'rowIds' | 'rows'>) {
+    this.projectSummaryHeaders.set(response.headers?.length ? response.headers : this.defaultDetailHeaders());
+    this.projectSummaryRowIds.set(response.rowIds || []);
+    this.projectSummaryRowsData.set(response.rows || []);
+    this.currentSummaryPage.set(1);
+  }
+
+  private projectSummaryCacheEntryKey(companyId: string, sheetName: string) {
+    return `${companyId}::${sheetName}`;
+  }
+
+  private readProjectSummaryCache(companyId: string, sheetName: string) {
+    const raw = localStorage.getItem(this.projectSummaryCacheKey);
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      const cache = JSON.parse(raw) as Record<string, CachedProjectSummary>;
+      const entry = cache[this.projectSummaryCacheEntryKey(companyId, sheetName)];
+      if (!entry) {
+        return null;
+      }
+
+      return {
+        headers: Array.isArray(entry.headers) ? entry.headers : [],
+        rowIds: Array.isArray(entry.rowIds) ? entry.rowIds : [],
+        rows: Array.isArray(entry.rows) ? entry.rows : []
+      } satisfies ProjectSummaryResponse;
+    } catch {
+      localStorage.removeItem(this.projectSummaryCacheKey);
+      return null;
+    }
+  }
+
+  private writeProjectSummaryCache(companyId: string, sheetName: string, response: Pick<ProjectSummaryResponse, 'headers' | 'rowIds' | 'rows'>) {
+    let cache: Record<string, CachedProjectSummary> = {};
+    const raw = localStorage.getItem(this.projectSummaryCacheKey);
+
+    if (raw) {
+      try {
+        cache = JSON.parse(raw) as Record<string, CachedProjectSummary>;
+      } catch {
+        cache = {};
+      }
+    }
+
+    cache[this.projectSummaryCacheEntryKey(companyId, sheetName)] = {
+      headers: response.headers?.length ? response.headers : this.defaultDetailHeaders(),
+      rowIds: response.rowIds || [],
+      rows: response.rows || [],
+      cachedAt: new Date().toISOString()
+    };
+
+    localStorage.setItem(this.projectSummaryCacheKey, JSON.stringify(cache));
+  }
+
+  private persistCurrentProjectSummaryCache() {
+    const currentSession = this.session();
+    if (!currentSession) {
+      return;
+    }
+
+    this.writeProjectSummaryCache(currentSession.company.id, this.currentDetailSheetName(), {
+      headers: this.projectSummaryHeaders(),
+      rowIds: this.projectSummaryRowIds(),
+      rows: this.projectSummaryRowsData()
+    });
+  }
+
   private restoreSession() {
     this.http.get<SessionResponse>(`${this.apiBaseUrl}/api/auth/me`, this.authOptions()).subscribe({
       next: (response) => {
@@ -2312,6 +2826,7 @@ export class AppComponent {
 
   private clearAuthState() {
     localStorage.removeItem(this.storageKey);
+    localStorage.removeItem(this.projectSummaryCacheKey);
     this.authToken.set('');
     this.session.set(null);
     this.selectedCompanyId.set('');

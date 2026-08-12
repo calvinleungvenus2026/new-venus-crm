@@ -205,7 +205,7 @@
                 >
               }
             </div>
-            <button class="command-button" [disabled]="projectSummaryLoading()" (click)="loadProjectSummary()">
+            <button class="command-button" [disabled]="projectSummaryLoading()" (click)="loadProjectSummary(true)">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M20 12A8 8 0 1 1 17.2 6"></path>
                 <path d="M20 4V10H14"></path>
@@ -410,6 +410,14 @@
             <button class="secondary-button" [class.active]="projectSummaryClampLines() === 2" (click)="setProjectSummaryClampLines(2)">双行</button>
           </div>
         </section>
+      }
+
+      @if (projectSummaryRowDragActive()) {
+        <div
+          class="summary-row-drag-overlay"
+          (mousemove)="onProjectSummaryRowDragOverlayMove($event)"
+          (mouseup)="endProjectSummaryRowSelection()"
+        ></div>
       }
 
       @if (currentSection() === 'dashboard') {
@@ -899,12 +907,38 @@
               }
             </section>
           } @else {
-            <div class="table-wrap summary-table-wrap">
+            <div class="table-wrap summary-table-wrap" [class.summary-table-wrap-dragging]="projectSummaryRowDragActive() || projectSummaryColumnDragActive()">
               <table class="summary-table">
-                  <thead>
+                  <thead class="summary-sheet-head">
+                    <tr class="summary-sheet-columns">
+                      <th class="summary-sheet-corner" aria-hidden="true"></th>
+                      @for (header of projectSummaryHeaders(); track header; let columnIndex = $index) {
+                        <th
+                          class="summary-sheet-column-label"
+                          [class.summary-sheet-column-selected]="isProjectSummaryColumnSelected(columnIndex)"
+                          [attr.data-summary-col-index]="columnIndex"
+                          [class.summary-col-client]="header === '客户公司名' || header === '终端客户/服务对象'"
+                          [class.summary-col-id]="header === '项目ID' || header === '合同编号' || header === '发票编号'"
+                          [class.summary-col-quo]="header === '报价单编号'"
+                          [class.summary-col-date]="header === '报价日期' || header === '合同日期' || header === '发票日期' || header === '到期日'"
+                          [class.summary-col-amount]="header === '报价金额' || header === '合同金额' || header === '目标金额' || header === '发票张数' || header === '发票总金额' || header === '发票应付金额' || header === '未开票金额' || header === '小计' || header === 'VAT金额' || header === '应付金额'"
+                          [class.summary-col-project]="header === '项目内容/服务名称' || header === '项目描述' || header === '匹配备注' || header === '源文件' || header === '项目/行项目说明' || header === '匹配说明'"
+                          [class.summary-col-type]="header === '合作类型/期限'"
+                          [class.summary-col-signer]="header === '负责人/联系人' || header === '服务方签署人' || header === '客户签署人'"
+                          [class.summary-col-status]="header === '状态'"
+                          (mousedown)="beginProjectSummaryColumnSelection(columnIndex, $event)"
+                        >
+                          {{ projectSummaryColumnLabel(columnIndex) }}
+                        </th>
+                      }
+                    </tr>
                     <tr>
+                      <th class="summary-row-number-cell summary-row-number-header">
+                      </th>
                       @for (header of projectSummaryHeaders(); track header) {
                         <th
+                          [attr.data-summary-col-index]="$index"
+                          [class.summary-column-header-selected]="isProjectSummaryColumnSelected($index)"
                           [class.summary-col-client]="header === '客户公司名' || header === '终端客户/服务对象'"
                           [class.summary-col-id]="header === '项目ID' || header === '合同编号' || header === '发票编号'"
                           [class.summary-col-quo]="header === '报价单编号'"
@@ -923,19 +957,36 @@
                   <tbody>
                     @if (projectSummaryCount() === 0) {
                       <tr>
+                        <td class="summary-row-number-cell summary-row-number-body">1</td>
                         <td class="summary-empty-cell" [attr.colspan]="projectSummaryHeaders().length || 1">当前项目里还没有可显示的{{ currentDetailSectionLabel() }}。</td>
                       </tr>
                     } @else {
-                      @for (record of paginatedProjectSummaryRows(); track record.rowId) {
-                        <tr>
+                      @for (record of paginatedProjectSummaryRows(); track record.rowId; let rowIndex = $index) {
+                        <tr
+                          [class.summary-row-selected]="isProjectSummaryRowSelected(record.rowId)"
+                          [attr.data-summary-row-id]="record.rowId"
+                          [attr.data-summary-row-index]="rowIndex"
+                        >
+                          <td
+                            class="summary-row-number-cell summary-row-number-body"
+                            [class.summary-row-number-selected]="isProjectSummaryRowSelected(record.rowId)"
+                            [attr.data-summary-row-index]="rowIndex"
+                            (mousedown)="beginProjectSummaryRowSelection(record.rowId, $event)"
+                          >
+                            {{ projectSummaryRowNumber(rowIndex) }}
+                          </td>
                           @for (cell of record.row; track $index) {
                             <td
                               class="summary-selectable-cell"
+                              [attr.data-summary-col-index]="$index"
                               [class.summary-cell-wrap]="projectSummaryShouldWrap($index)"
                               [class.summary-hover-cell]="!projectSummaryIsStatusColumn($index)"
                               [class.selected-grid-cell]="isProjectSummaryCellSelected(record.rowId, $index)"
+                              [class.summary-row-cell-selected]="isProjectSummaryRowSelected(record.rowId)"
+                              [class.summary-column-cell-selected]="isProjectSummaryColumnSelected($index)"
                               [ngStyle]="projectSummaryCellDisplayStyle(record.rowId, record.row, $index)"
-                              (click)="selectProjectSummaryCell(record.rowId, $index); startProjectSummaryInlineEdit(record.rowId, $index, cell)"
+                              (mousedown)="beginProjectSummaryRowSelectionFromCell(record.rowId, $event)"
+                              (click)="handleProjectSummaryCellClick(record.rowId, $index, cell)"
                             >
                               @if (projectSummaryIsStatusColumn($index)) {
                                 @if (isEditingProjectSummaryCell(record.rowId, $index)) {
