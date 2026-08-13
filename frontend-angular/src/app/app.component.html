@@ -905,6 +905,7 @@
                           [class.summary-col-signer]="header === '负责人/联系人' || header === '服务方签署人' || header === '客户签署人'"
                           [class.summary-col-status]="header === '状态'"
                           (mousedown)="beginProjectSummaryColumnSelection(columnIndex, $event)"
+                          (mouseenter)="extendProjectSummaryColumnSelection(columnIndex)"
                         >
                           {{ projectSummaryColumnLabel(columnIndex) }}
                           <span
@@ -931,6 +932,8 @@
                           [class.summary-col-type]="header === '合作类型/期限'"
                           [class.summary-col-signer]="header === '负责人/联系人' || header === '服务方签署人' || header === '客户签署人'"
                           [class.summary-col-status]="header === '状态'"
+                          (mousedown)="beginProjectSummaryColumnSelection($index, $event)"
+                          (mouseenter)="extendProjectSummaryColumnSelection($index)"
                         >
                           {{ header }}
                           <span
@@ -979,6 +982,7 @@
                               [class.summary-row-cell-selected]="isProjectSummaryRowSelected(record.rowId)"
                               [class.summary-column-cell-selected]="isProjectSummaryColumnSelected($index)"
                               (mousedown)="beginProjectSummaryRowSelectionFromCell(record.rowId, $event)"
+                              (mouseenter)="extendProjectSummaryColumnSelection($index)"
                               (click)="handleProjectSummaryCellClick(record.rowId, $index, cell)"
                             >
                               <span

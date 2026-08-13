@@ -996,6 +996,19 @@ export class AppComponent {
       return;
     }
 
+    const headerCell = event.currentTarget as HTMLElement | null;
+    if (headerCell) {
+      const rect = headerCell.getBoundingClientRect();
+      if (event.clientX >= rect.right - 12) {
+        this.beginProjectSummaryColumnResize(colIndex, event);
+        return;
+      }
+    }
+
+    if ((event.target as HTMLElement | null)?.closest('.summary-row-resize-handle')) {
+      return;
+    }
+
     event.preventDefault();
     window.getSelection()?.removeAllRanges();
     const currentSelection = this.selectedProjectSummaryColumns();
