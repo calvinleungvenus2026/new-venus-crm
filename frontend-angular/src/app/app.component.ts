@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, HostListener, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { forkJoin } from 'rxjs';
 
 interface Company {
   id: string;
@@ -126,6 +127,14 @@ interface CachedProjectSummary {
   headers: string[];
   rowIds: string[];
   rows: string[][];
+  cachedAt: string;
+}
+
+interface CachedDashboardData {
+  summaryHeaders: string[];
+  summaryRows: string[][];
+  invoiceHeaders: string[];
+  invoiceRows: string[][];
   cachedAt: string;
 }
 
@@ -286,14 +295,22 @@ export class AppComponent {
   private readonly storageKey = 'venus-crm-angular-auth';
   private readonly resetMarkerKey = 'venus-crm-data-reset-v1';
   private readonly projectSummaryCacheKey = 'venus-crm-project-summary-cache-v1';
+  private readonly projectSummaryColumnWidthCacheKey = 'venus-crm-project-summary-column-widths-v1';
+  private readonly projectSummaryRowHeightCacheKey = 'venus-crm-project-summary-row-heights-v1';
+  private readonly dashboardCacheKey = 'venus-crm-dashboard-cache-v1';
   private readonly pageSize = 15;
   private readonly apiBaseUrl = this.resolveApiBaseUrl();
   private projectSummaryRowDragBounds: Array<{ rowId: string; rowIndex: number; top: number; bottom: number }> = [];
+  private projectSummaryColumnResizeStartX = 0;
+  private projectSummaryColumnResizeStartWidth = 0;
+  private projectSummaryRowResizeStartY = 0;
+  private projectSummaryRowResizeStartHeight = 0;
 
   email = signal('admin-crm@venuslondontechnology.co.uk');
   password = signal('testtest123');
   error = signal('');
   submitting = signal(false);
+  restoringSession = signal(false);
   session = signal<SessionResponse | null>(null);
   selectedCompanyId = signal('');
   currentSection = signal<'dashboard' | 'projects' | 'invoices' | 'invoice-details' | 'drive'>('dashboard');
@@ -306,7 +323,7 @@ export class AppComponent {
   showProjectFilter = signal(false);
   showProjectSummarySearch = signal(false);
   showProjectSummaryFilter = signal(false);
-  showProjectSummaryFormatToolbar = signal(false);
+  showProjectSummaryFormatToolbar = signal(true);
   projectSummarySearchTerm = signal('');
   projectSummaryStatusFilter = signal('筛选');
   projectSummaryClampLines = signal<1 | 2>(2);
@@ -318,6 +335,10 @@ export class AppComponent {
   syncingProjects = signal(false);
   syncError = signal('');
   dashboardRows = signal<ProjectRow[]>([]);
+  dashboardSummaryHeaders = signal<string[]>([]);
+  dashboardSummaryRows = signal<string[][]>([]);
+  dashboardInvoiceHeaders = signal<string[]>([]);
+  dashboardInvoiceRows = signal<string[][]>([]);
   dashboardLoading = signal(false);
   dashboardError = signal('');
   showAddModal = signal(false);
@@ -329,6 +350,8 @@ export class AppComponent {
   driveLoading = signal(false);
   driveError = signal('');
   projectSummaryHeaders = signal<string[]>([]);
+  projectSummaryColumnWidths = signal<number[]>([]);
+  projectSummaryRowHeights = signal<Record<string, number>>({});
   projectSummaryRowIds = signal<string[]>([]);
   projectSummaryRowsData = signal<string[][]>([]);
   projectSummaryCellStyles = signal<Record<string, CellFormat>>({});
@@ -353,6 +376,8 @@ export class AppComponent {
   projectSummaryColumnDragStart = signal<number | null>(null);
   projectSummaryColumnDragMoved = signal(false);
   projectSummaryColumnToggleCandidate = signal(false);
+  projectSummaryResizingColumnIndex = signal<number | null>(null);
+  projectSummaryResizingRowId = signal<string | null>(null);
   suppressProjectSummaryCellClick = signal(false);
   projectSummaryVisibleRowIds = signal<string[]>([]);
   editingProjectSummaryCell = signal<{ rowId: string; colIndex: number } | null>(null);
@@ -374,6 +399,7 @@ export class AppComponent {
   constructor() {
     this.clearAllStoredProjectDataOnce();
     if (this.authToken()) {
+      this.restoringSession.set(true);
       this.restoreSession();
     }
   }
@@ -498,9 +524,7 @@ export class AppComponent {
   setProjectSummaryViewMode(mode: 'table' | 'grid') {
     this.resetProjectSummaryToolbarState(mode === 'grid' ? 'grid' : 'none');
     this.projectSummaryViewMode.set(mode);
-    if (mode !== 'table') {
-      this.showProjectSummaryFormatToolbar.set(false);
-    }
+    this.showProjectSummaryFormatToolbar.set(mode === 'table');
   }
 
   toggleProjectSummaryGridView() {
@@ -549,6 +573,7 @@ export class AppComponent {
           localStorage.setItem(this.storageKey, JSON.stringify({ token: response.token } satisfies StoredAuth));
           this.setAuthenticatedSession(response);
           this.submitting.set(false);
+          this.restoringSession.set(false);
           this.loadDashboardData();
           this.loadProjects();
           this.loadProjectSummary();
@@ -556,6 +581,7 @@ export class AppComponent {
         },
         error: () => {
           this.submitting.set(false);
+          this.restoringSession.set(false);
           this.error.set(
             '登录失败，请确认 Java 后端已启动，并使用已配置账号，例如 admin-crm@venuslondontechnology.co.uk / testtest123。'
           );
@@ -833,14 +859,7 @@ export class AppComponent {
   }
 
   toggleProjectSummaryFormat() {
-    if (this.showProjectSummaryFormatToolbar()) {
-      this.resetProjectSummaryToolbarState('none');
-      this.showProjectSummaryFormatToolbar.set(false);
-      return;
-    }
-
     this.projectSummaryViewMode.set('table');
-    this.resetProjectSummaryToolbarState('format');
     this.showProjectSummaryFormatToolbar.set(true);
   }
 
@@ -940,6 +959,10 @@ export class AppComponent {
   }
 
   beginProjectSummaryRowSelection(rowKey: string, event: MouseEvent) {
+    if ((event.target as HTMLElement | null)?.closest('.summary-row-resize-handle')) {
+      return;
+    }
+
     event.preventDefault();
     window.getSelection()?.removeAllRanges();
     this.selectedProjectSummaryColumns.set([]);
@@ -969,6 +992,10 @@ export class AppComponent {
   }
 
   beginProjectSummaryColumnSelection(colIndex: number, event: MouseEvent) {
+    if ((event.target as HTMLElement | null)?.closest('.summary-column-resize-handle')) {
+      return;
+    }
+
     event.preventDefault();
     window.getSelection()?.removeAllRanges();
     const currentSelection = this.selectedProjectSummaryColumns();
@@ -1167,8 +1194,71 @@ export class AppComponent {
     return this.selectedProjectSummaryColumns().includes(colIndex);
   }
 
+  projectSummaryColumnWidth(colIndex: number) {
+    return this.projectSummaryColumnWidths()[colIndex] || this.projectSummaryDefaultColumnWidth(this.projectSummaryHeaders()[colIndex] || '');
+  }
+
+  projectSummaryColumnStyle(colIndex: number) {
+    const width = this.projectSummaryColumnWidth(colIndex);
+    return {
+      width: `${width}px`,
+      minWidth: `${width}px`,
+      maxWidth: `${width}px`
+    };
+  }
+
+  projectSummaryTableWidth() {
+    return 52 + this.projectSummaryHeaders().reduce((sum, _header, index) => sum + this.projectSummaryColumnWidth(index), 0);
+  }
+
+  projectSummaryRowHeight(rowId: string) {
+    return this.projectSummaryRowHeights()[rowId] || 56;
+  }
+
+  projectSummaryRowStyle(rowId: string) {
+    const height = this.projectSummaryRowHeight(rowId);
+    return {
+      height: `${height}px`,
+      minHeight: `${height}px`
+    };
+  }
+
+  projectSummaryRowNumberStyle(rowId: string) {
+    return this.projectSummaryRowStyle(rowId);
+  }
+
+  projectSummaryBodyCellStyle(rowId: string, row: string[], colIndex: number) {
+    return {
+      ...this.projectSummaryColumnStyle(colIndex),
+      ...this.projectSummaryRowStyle(rowId),
+      ...this.projectSummaryCellDisplayStyle(rowId, row, colIndex)
+    };
+  }
+
+  beginProjectSummaryColumnResize(colIndex: number, event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    window.getSelection()?.removeAllRanges();
+    this.projectSummaryResizingColumnIndex.set(colIndex);
+    this.projectSummaryColumnResizeStartX = event.clientX;
+    this.projectSummaryColumnResizeStartWidth = this.projectSummaryColumnWidth(colIndex);
+  }
+
+  beginProjectSummaryRowResize(rowId: string, event: MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    window.getSelection()?.removeAllRanges();
+    this.projectSummaryResizingRowId.set(rowId);
+    this.projectSummaryRowResizeStartY = event.clientY;
+    this.projectSummaryRowResizeStartHeight = this.projectSummaryRowHeight(rowId);
+  }
+
   @HostListener('document:mousemove', ['$event'])
   onProjectSummaryRowSelectionDrag(event: MouseEvent) {
+    if (this.projectSummaryResizingRowId() !== null) {
+      return;
+    }
+
     if (!this.projectSummaryRowDragActive()) {
       return;
     }
@@ -1182,7 +1272,26 @@ export class AppComponent {
   }
 
   @HostListener('document:mousemove', ['$event'])
+  onProjectSummaryRowResizeDrag(event: MouseEvent) {
+    const rowId = this.projectSummaryResizingRowId();
+    if (!rowId) {
+      return;
+    }
+
+    const delta = event.clientY - this.projectSummaryRowResizeStartY;
+    const nextHeight = Math.max(36, this.projectSummaryRowResizeStartHeight + delta);
+    this.projectSummaryRowHeights.set({
+      ...this.projectSummaryRowHeights(),
+      [rowId]: nextHeight
+    });
+  }
+
+  @HostListener('document:mousemove', ['$event'])
   onProjectSummaryColumnSelectionDrag(event: MouseEvent) {
+    if (this.projectSummaryResizingColumnIndex() !== null) {
+      return;
+    }
+
     if (!this.projectSummaryColumnDragActive()) {
       return;
     }
@@ -1204,6 +1313,20 @@ export class AppComponent {
     }
 
     this.extendProjectSummaryColumnSelection(colIndex);
+  }
+
+  @HostListener('document:mousemove', ['$event'])
+  onProjectSummaryColumnResizeDrag(event: MouseEvent) {
+    const colIndex = this.projectSummaryResizingColumnIndex();
+    if (colIndex === null) {
+      return;
+    }
+
+    const delta = event.clientX - this.projectSummaryColumnResizeStartX;
+    const nextWidth = Math.max(80, this.projectSummaryColumnResizeStartWidth + delta);
+    const widths = [...this.projectSummaryColumnWidths()];
+    widths[colIndex] = nextWidth;
+    this.projectSummaryColumnWidths.set(widths);
   }
 
   @HostListener('document:mouseup')
@@ -1235,10 +1358,22 @@ export class AppComponent {
       shouldSuppressCellClick = true;
     }
 
+    if (this.projectSummaryResizingColumnIndex() !== null) {
+      this.persistProjectSummaryColumnWidths();
+      shouldSuppressCellClick = true;
+    }
+
+    if (this.projectSummaryResizingRowId() !== null) {
+      this.persistProjectSummaryRowHeights();
+      shouldSuppressCellClick = true;
+    }
+
     this.projectSummaryColumnDragActive.set(false);
     this.projectSummaryColumnDragStart.set(null);
     this.projectSummaryColumnDragMoved.set(false);
     this.projectSummaryColumnToggleCandidate.set(false);
+    this.projectSummaryResizingColumnIndex.set(null);
+    this.projectSummaryResizingRowId.set(null);
 
     this.suppressProjectSummaryCellClick.set(shouldSuppressCellClick);
   }
@@ -1727,39 +1862,77 @@ export class AppComponent {
     const end = new Date(now);
     end.setDate(end.getDate() + 30);
 
-    return this.dashboardRows().filter((row) => {
-      const dueDate = this.parseDate(row.deliveryDate || row.date);
-      return dueDate !== null && dueDate >= now && dueDate <= end;
+    const dueDateIndex = this.dashboardHeaderIndex(this.dashboardInvoiceHeaders(), ['到期日']);
+    const payableIndex = this.dashboardFirstHeaderIndex(this.dashboardInvoiceHeaders(), ['应付金额', '发票总额', '小计']);
+    if (dueDateIndex < 0) {
+      return this.dashboardRows().filter((row) => {
+        const dueDate = this.parseDate(row.deliveryDate || row.date);
+        return dueDate !== null && dueDate >= now && dueDate <= end;
+      }).length;
+    }
+
+    return this.dashboardInvoiceRows().filter((row) => {
+      const dueDate = this.parseDate(row[dueDateIndex] || '');
+      const payableAmount = payableIndex >= 0 ? this.parseAmount(row[payableIndex]) : 0;
+      return dueDate !== null && dueDate >= now && dueDate <= end && payableAmount > 0;
     }).length;
   }
 
   dashboardDataCompleteness() {
-    const fields: Array<keyof ProjectRow> = [
-      'clientCompany',
-      'quoNumber',
-      'msaNumber',
-      'msaStatus',
-      'date',
-      'amountGbp',
-      'engagementType',
-      'deliveryDate',
-      'completionStatus'
-    ];
-    const rows = this.dashboardRows();
-    if (!rows.length) {
-      return 0;
-    }
+    const summaryHeaders = this.dashboardSummaryHeaders();
+    const summaryRows = this.dashboardSummaryRows();
+    const invoiceHeaders = this.dashboardInvoiceHeaders();
+    const invoiceRows = this.dashboardInvoiceRows();
 
-    let completed = 0;
-    for (const row of rows) {
-      for (const field of fields) {
-        if (String(row[field] || '').trim()) {
-          completed += 1;
+    const summaryFields = [
+      this.dashboardHeaderIndex(summaryHeaders, ['客户公司名']),
+      this.dashboardHeaderIndex(summaryHeaders, ['项目ID']),
+      this.dashboardHeaderIndex(summaryHeaders, ['报价单编号']),
+      this.dashboardHeaderIndex(summaryHeaders, ['合同编号']),
+      this.dashboardFirstHeaderIndex(summaryHeaders, ['目标金额', '合同金额', '报价金额']),
+      this.dashboardHeaderIndex(summaryHeaders, ['发票编号']),
+      this.dashboardHeaderIndex(summaryHeaders, ['状态'])
+    ];
+    const invoiceFields = [
+      this.dashboardHeaderIndex(invoiceHeaders, ['匹配项目ID']),
+      this.dashboardHeaderIndex(invoiceHeaders, ['发票编号']),
+      this.dashboardHeaderIndex(invoiceHeaders, ['发票日期']),
+      this.dashboardHeaderIndex(invoiceHeaders, ['到期日']),
+      this.dashboardFirstHeaderIndex(invoiceHeaders, ['应付金额', '发票总额', '小计'])
+    ];
+
+    let totalCells = 0;
+    let completedCells = 0;
+
+    for (const row of summaryRows) {
+      for (const fieldIndex of summaryFields) {
+        if (fieldIndex < 0) {
+          continue;
+        }
+        totalCells += 1;
+        if ((row[fieldIndex] || '').trim()) {
+          completedCells += 1;
         }
       }
     }
 
-    return (completed / (rows.length * fields.length)) * 100;
+    for (const row of invoiceRows) {
+      for (const fieldIndex of invoiceFields) {
+        if (fieldIndex < 0) {
+          continue;
+        }
+        totalCells += 1;
+        if ((row[fieldIndex] || '').trim()) {
+          completedCells += 1;
+        }
+      }
+    }
+
+    if (!totalCells) {
+      return 0;
+    }
+
+    return (completedCells / totalCells) * 100;
   }
 
   dashboardAverageProjectValue() {
@@ -1987,6 +2160,180 @@ export class AppComponent {
         amountGbp: row.amountGbp,
         completionStatus: row.completionStatus
       } satisfies DashboardActivityItem));
+  }
+
+  private buildDashboardRowsFromSheets(summary: ProjectSummaryResponse, invoices: ProjectSummaryResponse, company: Company) {
+    const summaryHeaders = summary.headers || [];
+    const summaryRows = summary.rows || [];
+    const invoiceHeaders = invoices.headers || [];
+    const invoiceRows = invoices.rows || [];
+
+    const invoiceProjectIdIndex = this.dashboardHeaderIndex(invoiceHeaders, ['匹配项目ID']);
+    const invoiceClientIndex = this.dashboardHeaderIndex(invoiceHeaders, ['客户公司名']);
+    const invoiceNumberIndex = this.dashboardHeaderIndex(invoiceHeaders, ['发票编号']);
+    const invoiceDateIndex = this.dashboardHeaderIndex(invoiceHeaders, ['发票日期']);
+    const invoiceDueDateIndex = this.dashboardHeaderIndex(invoiceHeaders, ['到期日']);
+    const invoiceAmountIndex = this.dashboardFirstHeaderIndex(invoiceHeaders, ['应付金额', '发票总额', '小计']);
+    const invoiceDescriptionIndex = this.dashboardFirstHeaderIndex(invoiceHeaders, ['项目/行项目说明', '匹配说明', '源文件']);
+
+    const invoicesByProjectId = new Map<string, string[][]>();
+    const invoicesByClient = new Map<string, string[][]>();
+    for (const row of invoiceRows) {
+      const projectId = invoiceProjectIdIndex >= 0 ? (row[invoiceProjectIdIndex] || '').trim() : '';
+      const clientCompany = invoiceClientIndex >= 0 ? (row[invoiceClientIndex] || '').trim() : '';
+      if (projectId) {
+        invoicesByProjectId.set(projectId, [...(invoicesByProjectId.get(projectId) || []), row]);
+      }
+      if (clientCompany) {
+        invoicesByClient.set(clientCompany, [...(invoicesByClient.get(clientCompany) || []), row]);
+      }
+    }
+
+    const projectIdIndex = this.dashboardHeaderIndex(summaryHeaders, ['项目ID']);
+    const clientCompanyIndex = this.dashboardHeaderIndex(summaryHeaders, ['客户公司名']);
+    const quoNumberIndex = this.dashboardHeaderIndex(summaryHeaders, ['报价单编号']);
+    const quoDateIndex = this.dashboardHeaderIndex(summaryHeaders, ['报价日期']);
+    const quoAmountIndex = this.dashboardHeaderIndex(summaryHeaders, ['报价金额']);
+    const msaNumberIndex = this.dashboardHeaderIndex(summaryHeaders, ['合同编号']);
+    const msaDateIndex = this.dashboardHeaderIndex(summaryHeaders, ['合同日期']);
+    const msaAmountIndex = this.dashboardHeaderIndex(summaryHeaders, ['合同金额']);
+    const targetAmountIndex = this.dashboardHeaderIndex(summaryHeaders, ['目标金额']);
+    const deliverablesIndex = this.dashboardHeaderIndex(summaryHeaders, ['项目内容/服务名称']);
+    const engagementIndex = this.dashboardHeaderIndex(summaryHeaders, ['合作类型/期限']);
+    const signerIndex = this.dashboardFirstHeaderIndex(summaryHeaders, ['服务方签署人', '负责人/联系人']);
+    const invoiceNumbersIndex = this.dashboardHeaderIndex(summaryHeaders, ['发票编号']);
+    const invoiceDateSummaryIndex = this.dashboardHeaderIndex(summaryHeaders, ['发票日期']);
+    const unpaidAmountIndex = this.dashboardHeaderIndex(summaryHeaders, ['未开票金额']);
+    const statusIndex = this.dashboardHeaderIndex(summaryHeaders, ['状态']);
+    const noteIndex = this.dashboardFirstHeaderIndex(summaryHeaders, ['匹配备注', 'Column1']);
+
+    return summaryRows.map((row, index) => {
+      const projectId = projectIdIndex >= 0 ? (row[projectIdIndex] || '').trim() : '';
+      const clientCompany = clientCompanyIndex >= 0 ? (row[clientCompanyIndex] || '').trim() : '';
+      const matchedInvoices = projectId
+        ? (invoicesByProjectId.get(projectId) || [])
+        : (invoicesByClient.get(clientCompany) || []);
+      const latestDueDate = this.dashboardLatestDate(
+        matchedInvoices.map((invoiceRow) => invoiceDueDateIndex >= 0 ? invoiceRow[invoiceDueDateIndex] || '' : '')
+      );
+      const latestInvoiceDate = this.dashboardLatestDate(
+        matchedInvoices.map((invoiceRow) => invoiceDateIndex >= 0 ? invoiceRow[invoiceDateIndex] || '' : '')
+      );
+      const invoiceNumbers = [
+        ...(invoiceNumbersIndex >= 0 ? this.dashboardSplitValues(row[invoiceNumbersIndex]) : []),
+        ...matchedInvoices.map((invoiceRow) => invoiceNumberIndex >= 0 ? (invoiceRow[invoiceNumberIndex] || '').trim() : '')
+      ].filter(Boolean);
+      const dedupedInvoiceNumbers = [...new Set(invoiceNumbers)];
+      const summaryStatus = statusIndex >= 0 ? (row[statusIndex] || '').trim() : '';
+      const unpaidAmount = unpaidAmountIndex >= 0 ? this.parseAmount(row[unpaidAmountIndex]) : 0;
+      const payableAmount = matchedInvoices.reduce((sum, invoiceRow) => (
+        sum + (invoiceAmountIndex >= 0 ? this.parseAmount(invoiceRow[invoiceAmountIndex]) : 0)
+      ), 0);
+      const hasContract = msaNumberIndex >= 0 && (row[msaNumberIndex] || '').trim().length > 0;
+      const hasQuote = quoNumberIndex >= 0 && (row[quoNumberIndex] || '').trim().length > 0;
+      const hasInvoice = dedupedInvoiceNumbers.length > 0 || matchedInvoices.length > 0;
+
+      return this.hydrateProjectRow({
+        id: index + 1,
+        source: 'drive',
+        sourceKey: projectId || `${company.id}-${index + 1}`,
+        companyId: company.id,
+        company: company.name,
+        clientCompany,
+        quoNumber: quoNumberIndex >= 0 ? (row[quoNumberIndex] || '').trim() : '',
+        quoStatus: hasQuote ? '已报价' : '',
+        msaNumber: msaNumberIndex >= 0 ? (row[msaNumberIndex] || '').trim() : '',
+        msaStatus: this.dashboardDerivedMsaStatus(hasContract, hasQuote, summaryStatus),
+        date: this.dashboardPreferredValue(
+          msaDateIndex >= 0 ? row[msaDateIndex] : '',
+          quoDateIndex >= 0 ? row[quoDateIndex] : '',
+          invoiceDateSummaryIndex >= 0 ? row[invoiceDateSummaryIndex] : '',
+          latestInvoiceDate
+        ),
+        amountGbp: this.dashboardPreferredValue(
+          targetAmountIndex >= 0 ? row[targetAmountIndex] : '',
+          msaAmountIndex >= 0 ? row[msaAmountIndex] : '',
+          quoAmountIndex >= 0 ? row[quoAmountIndex] : '',
+          String(payableAmount || '')
+        ),
+        relatedInvoice: dedupedInvoiceNumbers.join('; '),
+        deliverables: this.dashboardPreferredValue(
+          deliverablesIndex >= 0 ? row[deliverablesIndex] : '',
+          matchedInvoices[0] && invoiceDescriptionIndex >= 0 ? matchedInvoices[0][invoiceDescriptionIndex] : ''
+        ),
+        engagementType: engagementIndex >= 0 ? (row[engagementIndex] || '').trim() : '',
+        startDate: quoDateIndex >= 0 ? (row[quoDateIndex] || '').trim() : '',
+        deliveryDate: latestDueDate,
+        phase1Status: '',
+        phase2Status: '',
+        phase3Status: '',
+        msaSigner: signerIndex >= 0 ? (row[signerIndex] || '').trim() : '',
+        note: noteIndex >= 0 ? (row[noteIndex] || '').trim() : '',
+        completionStatus: this.dashboardDerivedCompletionStatus(summaryStatus, unpaidAmount, hasContract, hasInvoice),
+        cellStyleJson: ''
+      });
+    });
+  }
+
+  private dashboardHeaderIndex(headers: string[], aliases: string[]) {
+    const normalizedAliases = aliases.map((alias) => this.dashboardNormalizeHeader(alias));
+    return headers.findIndex((header) => normalizedAliases.includes(this.dashboardNormalizeHeader(header)));
+  }
+
+  private dashboardFirstHeaderIndex(headers: string[], aliases: string[]) {
+    return this.dashboardHeaderIndex(headers, aliases);
+  }
+
+  private dashboardNormalizeHeader(value: string) {
+    return (value || '').replace(/\s+/g, '').trim().toLowerCase();
+  }
+
+  private dashboardSplitValues(value?: string) {
+    return (value || '')
+      .split(/[;；,\n]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  private dashboardLatestDate(values: string[]) {
+    const dates = values
+      .map((value) => ({ raw: value, parsed: this.parseDate(value) }))
+      .filter((entry): entry is { raw: string; parsed: Date } => entry.parsed !== null)
+      .sort((a, b) => b.parsed.getTime() - a.parsed.getTime());
+    return dates[0]?.raw || '';
+  }
+
+  private dashboardPreferredValue(...values: Array<string | undefined>) {
+    for (const value of values) {
+      if ((value || '').trim()) {
+        return value!.trim();
+      }
+    }
+    return '';
+  }
+
+  private dashboardDerivedMsaStatus(hasContract: boolean, hasQuote: boolean, summaryStatus: string) {
+    if (hasContract) {
+      return '已签署';
+    }
+    if (hasQuote || this.normalizeStatus(summaryStatus).includes('部分')) {
+      return '待跟进';
+    }
+    return '';
+  }
+
+  private dashboardDerivedCompletionStatus(summaryStatus: string, unpaidAmount: number, hasContract: boolean, hasInvoice: boolean) {
+    const normalizedStatus = this.normalizeStatus(summaryStatus);
+    if (normalizedStatus.includes('发票金额匹配') || (hasInvoice && unpaidAmount <= 0)) {
+      return '已完成';
+    }
+    if (normalizedStatus.includes('部分开票') || hasContract) {
+      return '进行中';
+    }
+    if (normalizedStatus.includes('未见发票')) {
+      return '待启动';
+    }
+    return hasInvoice ? '进行中' : '';
   }
 
   projectSummaryRows() {
@@ -2461,33 +2808,58 @@ export class AppComponent {
     const currentSession = this.session();
     if (!currentSession) {
       this.dashboardRows.set([]);
+      this.dashboardSummaryHeaders.set([]);
+      this.dashboardSummaryRows.set([]);
+      this.dashboardInvoiceHeaders.set([]);
+      this.dashboardInvoiceRows.set([]);
       this.dashboardError.set('');
       return;
     }
 
-    this.dashboardLoading.set(true);
     this.dashboardError.set('');
+    const cached = this.readDashboardCache(currentSession.company.id);
+    if (cached) {
+      this.applyDashboardCache(currentSession.company, cached);
+      this.dashboardLoading.set(false);
+    } else {
+      this.dashboardLoading.set(true);
+    }
 
-    this.http
-      .get<ProjectRow[]>(
-        `${this.apiBaseUrl}/api/project-rows?companyId=${encodeURIComponent(currentSession.company.id)}`,
+    forkJoin({
+      summary: this.http.get<ProjectSummaryResponse>(
+        `${this.apiBaseUrl}/api/project-summary?companyId=${encodeURIComponent(currentSession.company.id)}&sheetName=${encodeURIComponent('项目汇总')}`,
+        this.authOptions()
+      ),
+      invoiceDetails: this.http.get<ProjectSummaryResponse>(
+        `${this.apiBaseUrl}/api/project-summary?companyId=${encodeURIComponent(currentSession.company.id)}&sheetName=${encodeURIComponent('发票明细')}`,
         this.authOptions()
       )
+    })
       .subscribe({
-        next: (rows) => {
-          this.dashboardRows.set(
-            (rows || []).map((row) => ({
-              ...this.hydrateProjectRow(row),
-              company: row.company || currentSession.company.name,
-              companyId: row.companyId || currentSession.company.id
-            }))
-          );
+        next: ({ summary, invoiceDetails }) => {
+          this.dashboardSummaryHeaders.set(summary.headers || []);
+          this.dashboardSummaryRows.set(summary.rows || []);
+          this.dashboardInvoiceHeaders.set(invoiceDetails.headers || []);
+          this.dashboardInvoiceRows.set(invoiceDetails.rows || []);
+          this.dashboardRows.set(this.buildDashboardRowsFromSheets(summary, invoiceDetails, currentSession.company));
+          this.writeDashboardCache(currentSession.company.id, {
+            summaryHeaders: summary.headers || [],
+            summaryRows: summary.rows || [],
+            invoiceHeaders: invoiceDetails.headers || [],
+            invoiceRows: invoiceDetails.rows || []
+          });
           this.dashboardLoading.set(false);
         },
         error: () => {
-          this.dashboardRows.set([]);
           this.dashboardLoading.set(false);
-          this.dashboardError.set('Dashboard 数据读取失败，请确认数据库与 Java backend 正在运行。');
+          if (!cached) {
+            this.dashboardRows.set([]);
+            this.dashboardSummaryHeaders.set([]);
+            this.dashboardSummaryRows.set([]);
+            this.dashboardInvoiceHeaders.set([]);
+            this.dashboardInvoiceRows.set([]);
+            this.dashboardError.set('Dashboard 数据读取失败，请确认项目汇总、发票明细和 Java backend 正在运行。');
+          }
         }
       });
   }
@@ -2705,6 +3077,23 @@ export class AppComponent {
       : [...this.defaultProjectSummaryHeaders];
   }
 
+  private projectSummaryDefaultColumnWidth(header: string) {
+    if (header === '客户公司名' || header === '终端客户/服务对象') return 220;
+    if (header === '项目ID' || header === '合同编号' || header === '发票编号') return 180;
+    if (header === '报价单编号') return 200;
+    if (header === '报价日期' || header === '合同日期' || header === '发票日期' || header === '到期日') return 130;
+    if (header === '报价金额' || header === '合同金额' || header === '目标金额' || header === '发票张数' || header === '发票总金额' || header === '发票应付金额' || header === '未开票金额' || header === '小计' || header === 'VAT金额' || header === '应付金额') return 120;
+    if (header === '状态') return 130;
+    if (header === '项目内容/服务名称' || header === '项目描述' || header === '匹配备注' || header === '源文件' || header === '项目/行项目说明' || header === '匹配说明') return 360;
+    if (header === '合作类型/期限') return 220;
+    if (header === '负责人/联系人' || header === '服务方签署人' || header === '客户签署人') return 160;
+    return 160;
+  }
+
+  private defaultProjectSummaryColumnWidths(headers: string[]) {
+    return headers.map((header) => this.projectSummaryDefaultColumnWidth(header));
+  }
+
   private projectSummaryColumnIndex(headerName: string) {
     return this.projectSummaryHeaders().findIndex((header) => header === headerName);
   }
@@ -2732,8 +3121,12 @@ export class AppComponent {
   }
 
   private applyProjectSummaryResponse(response: Pick<ProjectSummaryResponse, 'headers' | 'rowIds' | 'rows'>) {
-    this.projectSummaryHeaders.set(response.headers?.length ? response.headers : this.defaultDetailHeaders());
-    this.projectSummaryRowIds.set(response.rowIds || []);
+    const headers = response.headers?.length ? response.headers : this.defaultDetailHeaders();
+    const rowIds = response.rowIds || [];
+    this.projectSummaryHeaders.set(headers);
+    this.projectSummaryColumnWidths.set(this.readProjectSummaryColumnWidths(this.currentDetailSheetName(), headers));
+    this.projectSummaryRowHeights.set(this.readProjectSummaryRowHeights(this.currentDetailSheetName(), rowIds));
+    this.projectSummaryRowIds.set(rowIds);
     this.projectSummaryRowsData.set(response.rows || []);
     this.currentSummaryPage.set(1);
   }
@@ -2788,6 +3181,162 @@ export class AppComponent {
     localStorage.setItem(this.projectSummaryCacheKey, JSON.stringify(cache));
   }
 
+  private projectSummaryColumnWidthCacheEntryKey(companyId: string, sheetName: string) {
+    return `${companyId}::${sheetName}`;
+  }
+
+  private readProjectSummaryColumnWidths(sheetName: string, headers: string[]) {
+    const currentSession = this.session();
+    if (!currentSession) {
+      return this.defaultProjectSummaryColumnWidths(headers);
+    }
+
+    const raw = localStorage.getItem(this.projectSummaryColumnWidthCacheKey);
+    if (!raw) {
+      return this.defaultProjectSummaryColumnWidths(headers);
+    }
+
+    try {
+      const cache = JSON.parse(raw) as Record<string, number[]>;
+      const entry = cache[this.projectSummaryColumnWidthCacheEntryKey(currentSession.company.id, sheetName)];
+      if (!Array.isArray(entry) || entry.length !== headers.length) {
+        return this.defaultProjectSummaryColumnWidths(headers);
+      }
+      return entry.map((value, index) => Math.max(80, Number(value) || this.projectSummaryDefaultColumnWidth(headers[index] || '')));
+    } catch {
+      localStorage.removeItem(this.projectSummaryColumnWidthCacheKey);
+      return this.defaultProjectSummaryColumnWidths(headers);
+    }
+  }
+
+  private persistProjectSummaryColumnWidths() {
+    const currentSession = this.session();
+    if (!currentSession || !this.projectSummaryHeaders().length) {
+      return;
+    }
+
+    let cache: Record<string, number[]> = {};
+    const raw = localStorage.getItem(this.projectSummaryColumnWidthCacheKey);
+    if (raw) {
+      try {
+        cache = JSON.parse(raw) as Record<string, number[]>;
+      } catch {
+        cache = {};
+      }
+    }
+
+    cache[this.projectSummaryColumnWidthCacheEntryKey(currentSession.company.id, this.currentDetailSheetName())] = this.projectSummaryColumnWidths();
+    localStorage.setItem(this.projectSummaryColumnWidthCacheKey, JSON.stringify(cache));
+  }
+
+  private projectSummaryRowHeightCacheEntryKey(companyId: string, sheetName: string) {
+    return `${companyId}::${sheetName}`;
+  }
+
+  private readProjectSummaryRowHeights(sheetName: string, rowIds: string[]) {
+    const currentSession = this.session();
+    if (!currentSession || !rowIds.length) {
+      return {};
+    }
+
+    const raw = localStorage.getItem(this.projectSummaryRowHeightCacheKey);
+    if (!raw) {
+      return {};
+    }
+
+    try {
+      const cache = JSON.parse(raw) as Record<string, Record<string, number>>;
+      const entry = cache[this.projectSummaryRowHeightCacheEntryKey(currentSession.company.id, sheetName)];
+      if (!entry || typeof entry !== 'object') {
+        return {};
+      }
+
+      const next: Record<string, number> = {};
+      for (const rowId of rowIds) {
+        const height = Number(entry[rowId]);
+        if (!Number.isNaN(height) && height >= 36) {
+          next[rowId] = height;
+        }
+      }
+      return next;
+    } catch {
+      localStorage.removeItem(this.projectSummaryRowHeightCacheKey);
+      return {};
+    }
+  }
+
+  private persistProjectSummaryRowHeights() {
+    const currentSession = this.session();
+    if (!currentSession || !this.projectSummaryRowIds().length) {
+      return;
+    }
+
+    let cache: Record<string, Record<string, number>> = {};
+    const raw = localStorage.getItem(this.projectSummaryRowHeightCacheKey);
+    if (raw) {
+      try {
+        cache = JSON.parse(raw) as Record<string, Record<string, number>>;
+      } catch {
+        cache = {};
+      }
+    }
+
+    cache[this.projectSummaryRowHeightCacheEntryKey(currentSession.company.id, this.currentDetailSheetName())] = this.projectSummaryRowHeights();
+    localStorage.setItem(this.projectSummaryRowHeightCacheKey, JSON.stringify(cache));
+  }
+
+  private readDashboardCache(companyId: string) {
+    const raw = localStorage.getItem(this.dashboardCacheKey);
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      const cache = JSON.parse(raw) as Record<string, CachedDashboardData>;
+      return cache[companyId] || null;
+    } catch {
+      localStorage.removeItem(this.dashboardCacheKey);
+      return null;
+    }
+  }
+
+  private writeDashboardCache(
+    companyId: string,
+    payload: Omit<CachedDashboardData, 'cachedAt'>
+  ) {
+    let cache: Record<string, CachedDashboardData> = {};
+    const raw = localStorage.getItem(this.dashboardCacheKey);
+    if (raw) {
+      try {
+        cache = JSON.parse(raw) as Record<string, CachedDashboardData>;
+      } catch {
+        cache = {};
+      }
+    }
+
+    cache[companyId] = {
+      ...payload,
+      cachedAt: new Date().toISOString()
+    };
+    localStorage.setItem(this.dashboardCacheKey, JSON.stringify(cache));
+  }
+
+  private applyDashboardCache(company: Company, cached: CachedDashboardData) {
+    this.dashboardSummaryHeaders.set(cached.summaryHeaders || []);
+    this.dashboardSummaryRows.set(cached.summaryRows || []);
+    this.dashboardInvoiceHeaders.set(cached.invoiceHeaders || []);
+    this.dashboardInvoiceRows.set(cached.invoiceRows || []);
+    this.dashboardRows.set(this.buildDashboardRowsFromSheets({
+      headers: cached.summaryHeaders || [],
+      rowIds: [],
+      rows: cached.summaryRows || []
+    }, {
+      headers: cached.invoiceHeaders || [],
+      rowIds: [],
+      rows: cached.invoiceRows || []
+    }, company));
+  }
+
   private persistCurrentProjectSummaryCache() {
     const currentSession = this.session();
     if (!currentSession) {
@@ -2805,12 +3354,14 @@ export class AppComponent {
     this.http.get<SessionResponse>(`${this.apiBaseUrl}/api/auth/me`, this.authOptions()).subscribe({
       next: (response) => {
         this.setAuthenticatedSession(response);
+        this.restoringSession.set(false);
         this.loadDashboardData();
         this.loadProjects();
         this.loadProjectSummary();
         this.loadDriveFiles();
       },
       error: () => {
+        this.restoringSession.set(false);
         this.clearAuthState();
       }
     });
@@ -2827,10 +3378,18 @@ export class AppComponent {
   private clearAuthState() {
     localStorage.removeItem(this.storageKey);
     localStorage.removeItem(this.projectSummaryCacheKey);
+    localStorage.removeItem(this.projectSummaryColumnWidthCacheKey);
+    localStorage.removeItem(this.projectSummaryRowHeightCacheKey);
+    localStorage.removeItem(this.dashboardCacheKey);
     this.authToken.set('');
+    this.restoringSession.set(false);
     this.session.set(null);
     this.selectedCompanyId.set('');
     this.dashboardRows.set([]);
+    this.dashboardSummaryHeaders.set([]);
+    this.dashboardSummaryRows.set([]);
+    this.dashboardInvoiceHeaders.set([]);
+    this.dashboardInvoiceRows.set([]);
     this.dashboardError.set('');
     this.projects.set([]);
     this.projectSummaryHeaders.set([]);

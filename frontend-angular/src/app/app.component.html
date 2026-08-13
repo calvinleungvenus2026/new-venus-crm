@@ -1,4 +1,10 @@
-@if (!session()) {
+@if (restoringSession()) {
+  <div class="login-shell">
+    <div class="loading-state loading-state-standalone" aria-live="polite">
+      <span class="loading-spinner" aria-hidden="true"></span>
+    </div>
+  </div>
+} @else if (!session()) {
   <div class="login-shell">
     <section class="login-card">
       <p class="eyebrow">Venus Platform</p>
@@ -166,18 +172,6 @@
                 </svg>
                 <span>网格</span>
               </button>
-              <button
-                class="command-button"
-                [class.command-button-active]="showFormatToolbar() && projectViewMode() === 'table'"
-                (click)="toggleProjectFormat()"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M4 14L10 8L16 14L10 20L4 14Z"></path>
-                  <path d="M10 8L14 4L20 10L16 14"></path>
-                  <path d="M4 20H20"></path>
-                </svg>
-                <span>格式</span>
-              </button>
             </div>
           </div>
         }
@@ -257,18 +251,6 @@
                 <rect x="13" y="13" width="7" height="7"></rect>
               </svg>
               <span>网格</span>
-            </button>
-            <button
-              class="command-button"
-              [class.command-button-active]="showProjectSummaryFormatToolbar() && projectSummaryViewMode() === 'table'"
-              (click)="toggleProjectSummaryFormat()"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 14L10 8L16 14L10 20L4 14Z"></path>
-                <path d="M10 8L14 4L20 10L16 14"></path>
-                <path d="M4 20H20"></path>
-              </svg>
-              <span>格式</span>
             </button>
           </div>
         </div>
@@ -507,20 +489,35 @@
 
               <section class="dashboard-card dashboard-section">
                 <div class="dashboard-section-head">
-                  <h2>月度金额趋势</h2>
-                  <p>按项目日期聚合最近 6 个月的项目金额，用来判断最近业务节奏是否在抬升。</p>
+                  <h2>项目类型结构</h2>
+                  <p>快速判断当前公司的交付模型，是一次性交付为主，还是长期阶段制项目为主。</p>
                 </div>
-                <div class="dashboard-trend-chart">
-                  @for (month of dashboardMonthlyTrend(); track month.label) {
-                    <article class="dashboard-trend-bar-group">
-                      <span class="dashboard-trend-amount">{{ formatCurrency(month.amount) }}</span>
-                      <div class="dashboard-trend-bar-shell">
-                        <span class="dashboard-trend-bar" [style.height.%]="month.ratio"></span>
+                <div class="dashboard-bottom-composition">
+                  <div class="dashboard-bottom-composition-copy">
+                    @if (dashboardEngagementPrimarySlice(); as primarySlice) {
+                      <div class="dashboard-insight-highlight">
+                        <strong>{{ primarySlice.label }}</strong>
+                        <span>{{ primarySlice.count }} 个项目，占当前结构最高</span>
                       </div>
-                      <strong>{{ month.label }}</strong>
-                      <small>{{ month.count }} 项</small>
-                    </article>
-                  }
+                    }
+                    <div class="dashboard-insight-legend">
+                      @for (slice of dashboardEngagementSlices(); track slice.label) {
+                        <div class="dashboard-legend-row">
+                          <span class="dashboard-legend-dot" [style.background]="slice.color"></span>
+                          <span>{{ slice.label }}</span>
+                          <strong>{{ slice.count }}</strong>
+                        </div>
+                      }
+                    </div>
+                  </div>
+                  <div class="dashboard-pie-shell">
+                    <div class="dashboard-pie-chart" [style.background]="dashboardEngagementGradient()">
+                      <div class="dashboard-pie-center">
+                        <strong>{{ dashboardEngagementTotal() }}</strong>
+                        <span>项目</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </section>
             </div>
@@ -554,40 +551,6 @@
                     </article>
                   </section>
                 }
-
-                <section class="dashboard-card dashboard-section">
-                  <div class="dashboard-section-head">
-                    <h2>项目类型结构</h2>
-                    <p>快速判断当前公司的交付模型，是一次性交付为主，还是长期阶段制项目为主。</p>
-                  </div>
-                  <div class="dashboard-bottom-composition">
-                    <div class="dashboard-bottom-composition-copy">
-                      @if (dashboardEngagementPrimarySlice(); as primarySlice) {
-                        <div class="dashboard-insight-highlight">
-                          <strong>{{ primarySlice.label }}</strong>
-                          <span>{{ primarySlice.count }} 个项目，占当前结构最高</span>
-                        </div>
-                      }
-                      <div class="dashboard-insight-legend">
-                        @for (slice of dashboardEngagementSlices(); track slice.label) {
-                          <div class="dashboard-legend-row">
-                            <span class="dashboard-legend-dot" [style.background]="slice.color"></span>
-                            <span>{{ slice.label }}</span>
-                            <strong>{{ slice.count }}</strong>
-                          </div>
-                        }
-                      </div>
-                    </div>
-                    <div class="dashboard-pie-shell">
-                      <div class="dashboard-pie-chart" [style.background]="dashboardEngagementGradient()">
-                        <div class="dashboard-pie-center">
-                          <strong>{{ dashboardEngagementTotal() }}</strong>
-                          <span>项目</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </section>
 
                 <section class="dashboard-card dashboard-section">
                   <div class="dashboard-section-head">
@@ -908,13 +871,28 @@
             </section>
           } @else {
             <div class="table-wrap summary-table-wrap" [class.summary-table-wrap-dragging]="projectSummaryRowDragActive() || projectSummaryColumnDragActive()">
-              <table class="summary-table">
+              <table
+                class="summary-table"
+                [style.width.px]="projectSummaryTableWidth()"
+                [style.min-width.px]="projectSummaryTableWidth()"
+              >
+                  <colgroup>
+                    <col style="width: 52px; min-width: 52px; max-width: 52px;">
+                    @for (header of projectSummaryHeaders(); track header; let columnIndex = $index) {
+                      <col
+                        [style.width.px]="projectSummaryColumnWidth(columnIndex)"
+                        [style.min-width.px]="projectSummaryColumnWidth(columnIndex)"
+                        [style.max-width.px]="projectSummaryColumnWidth(columnIndex)"
+                      >
+                    }
+                  </colgroup>
                   <thead class="summary-sheet-head">
                     <tr class="summary-sheet-columns">
                       <th class="summary-sheet-corner" aria-hidden="true"></th>
                       @for (header of projectSummaryHeaders(); track header; let columnIndex = $index) {
                         <th
                           class="summary-sheet-column-label"
+                          [ngStyle]="projectSummaryColumnStyle(columnIndex)"
                           [class.summary-sheet-column-selected]="isProjectSummaryColumnSelected(columnIndex)"
                           [attr.data-summary-col-index]="columnIndex"
                           [class.summary-col-client]="header === '客户公司名' || header === '终端客户/服务对象'"
@@ -929,6 +907,10 @@
                           (mousedown)="beginProjectSummaryColumnSelection(columnIndex, $event)"
                         >
                           {{ projectSummaryColumnLabel(columnIndex) }}
+                          <span
+                            class="summary-column-resize-handle"
+                            (mousedown)="beginProjectSummaryColumnResize(columnIndex, $event)"
+                          ></span>
                         </th>
                       }
                     </tr>
@@ -937,6 +919,7 @@
                       </th>
                       @for (header of projectSummaryHeaders(); track header) {
                         <th
+                          [ngStyle]="projectSummaryColumnStyle($index)"
                           [attr.data-summary-col-index]="$index"
                           [class.summary-column-header-selected]="isProjectSummaryColumnSelected($index)"
                           [class.summary-col-client]="header === '客户公司名' || header === '终端客户/服务对象'"
@@ -950,6 +933,10 @@
                           [class.summary-col-status]="header === '状态'"
                         >
                           {{ header }}
+                          <span
+                            class="summary-column-resize-handle summary-column-resize-handle-secondary"
+                            (mousedown)="beginProjectSummaryColumnResize($index, $event)"
+                          ></span>
                         </th>
                       }
                     </tr>
@@ -963,31 +950,45 @@
                     } @else {
                       @for (record of paginatedProjectSummaryRows(); track record.rowId; let rowIndex = $index) {
                         <tr
+                          [ngStyle]="projectSummaryRowStyle(record.rowId)"
                           [class.summary-row-selected]="isProjectSummaryRowSelected(record.rowId)"
                           [attr.data-summary-row-id]="record.rowId"
                           [attr.data-summary-row-index]="rowIndex"
                         >
                           <td
                             class="summary-row-number-cell summary-row-number-body"
+                            [ngStyle]="projectSummaryRowNumberStyle(record.rowId)"
                             [class.summary-row-number-selected]="isProjectSummaryRowSelected(record.rowId)"
                             [attr.data-summary-row-index]="rowIndex"
                             (mousedown)="beginProjectSummaryRowSelection(record.rowId, $event)"
                           >
                             {{ projectSummaryRowNumber(rowIndex) }}
+                            <span
+                              class="summary-row-resize-handle"
+                              (mousedown)="beginProjectSummaryRowResize(record.rowId, $event)"
+                            ></span>
                           </td>
                           @for (cell of record.row; track $index) {
                             <td
                               class="summary-selectable-cell"
+                              [ngStyle]="projectSummaryBodyCellStyle(record.rowId, record.row, $index)"
                               [attr.data-summary-col-index]="$index"
                               [class.summary-cell-wrap]="projectSummaryShouldWrap($index)"
                               [class.summary-hover-cell]="!projectSummaryIsStatusColumn($index)"
                               [class.selected-grid-cell]="isProjectSummaryCellSelected(record.rowId, $index)"
                               [class.summary-row-cell-selected]="isProjectSummaryRowSelected(record.rowId)"
                               [class.summary-column-cell-selected]="isProjectSummaryColumnSelected($index)"
-                              [ngStyle]="projectSummaryCellDisplayStyle(record.rowId, record.row, $index)"
                               (mousedown)="beginProjectSummaryRowSelectionFromCell(record.rowId, $event)"
                               (click)="handleProjectSummaryCellClick(record.rowId, $index, cell)"
                             >
+                              <span
+                                class="summary-row-resize-handle summary-row-resize-handle-cell"
+                                (mousedown)="beginProjectSummaryRowResize(record.rowId, $event)"
+                              ></span>
+                              <span
+                                class="summary-column-resize-handle summary-column-resize-handle-cell"
+                                (mousedown)="beginProjectSummaryColumnResize($index, $event)"
+                              ></span>
                               @if (projectSummaryIsStatusColumn($index)) {
                                 @if (isEditingProjectSummaryCell(record.rowId, $index)) {
                                   <input

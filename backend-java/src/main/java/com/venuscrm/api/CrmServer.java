@@ -311,9 +311,30 @@ public final class CrmServer {
                 AuthenticatedSession auth = requireSession(exchange);
                 ensureCompanyAccess(auth, companyId);
                 AppConfig config = AppConfig.load();
+                String projectSummaryDriveWorkbookFileId = config.projectSummaryDriveWorkbookFileIdForCompany(companyId);
+                String projectSummaryDriveWorkbookFileName = config.projectSummaryDriveWorkbookFileNameForCompany(companyId);
+                String projectSummaryWorkbookPath = config.projectSummaryWorkbookPathForCompany(companyId);
                 String driveWorkbookFileId = config.driveWorkbookFileIdForCompany(companyId);
                 String driveWorkbookFileName = config.driveWorkbookFileNameForCompany(companyId);
                 String folderId = config.folderIdForCompany(companyId);
+                if (projectSummaryDriveWorkbookFileId != null && !projectSummaryDriveWorkbookFileId.isBlank()) {
+                    ServiceAccountCredentials credentials = ServiceAccountCredentials.fromFile(config.serviceAccountJsonPath());
+                    String accessToken = requestDriveAccessToken(credentials);
+                    DriveEntry workbookEntry = fetchDriveFileById(accessToken, projectSummaryDriveWorkbookFileId);
+                    respondJson(exchange, 200, driveWorkbookListingJson(companyId, workbookEntry));
+                    return;
+                }
+                if (projectSummaryDriveWorkbookFileName != null && !projectSummaryDriveWorkbookFileName.isBlank()) {
+                    ServiceAccountCredentials credentials = ServiceAccountCredentials.fromFile(config.serviceAccountJsonPath());
+                    String accessToken = requestDriveAccessToken(credentials);
+                    DriveEntry workbookEntry = fetchDriveFileByName(accessToken, projectSummaryDriveWorkbookFileName, folderId);
+                    respondJson(exchange, 200, driveWorkbookListingJson(companyId, workbookEntry));
+                    return;
+                }
+                if (projectSummaryWorkbookPath != null && !projectSummaryWorkbookPath.isBlank()) {
+                    respondJson(exchange, 200, workbookListingJson(projectSummaryWorkbookPath, companyId));
+                    return;
+                }
                 if (driveWorkbookFileId != null && !driveWorkbookFileId.isBlank()) {
                     ServiceAccountCredentials credentials = ServiceAccountCredentials.fromFile(config.serviceAccountJsonPath());
                     String accessToken = requestDriveAccessToken(credentials);
@@ -3046,6 +3067,7 @@ public final class CrmServer {
             putIfPresent(companyWorkbooks, "novasoft-tech", env.get("NOVASOFT_TECH_CRM_XLSX_PATH"));
 
             Map<String, String> companyProjectSummaryWorkbooks = new HashMap<>();
+            putIfPresent(companyProjectSummaryWorkbooks, "ripple-mic", env.get("RIPPLE_MIC_PROJECT_SUMMARY_XLSX_PATH"));
             putIfPresent(companyProjectSummaryWorkbooks, "momentum-growth", env.get("MOMENTUM_GROWTH_PROJECT_SUMMARY_XLSX_PATH"));
 
             Map<String, String> companyDriveWorkbookFileIds = new HashMap<>();
@@ -3062,6 +3084,7 @@ public final class CrmServer {
             putIfPresent(companyDriveWorkbookFileIds, "novasoft-tech", env.get("NOVASOFT_TECH_CRM_DRIVE_FILE_ID"));
 
             Map<String, String> companyProjectSummaryDriveWorkbookFileIds = new HashMap<>();
+            putIfPresent(companyProjectSummaryDriveWorkbookFileIds, "ripple-mic", env.get("RIPPLE_MIC_PROJECT_SUMMARY_DRIVE_FILE_ID"));
             putIfPresent(companyProjectSummaryDriveWorkbookFileIds, "momentum-growth", env.get("MOMENTUM_GROWTH_PROJECT_SUMMARY_DRIVE_FILE_ID"));
 
             Map<String, String> companyDriveWorkbookFileNames = new HashMap<>();
@@ -3078,6 +3101,7 @@ public final class CrmServer {
             putIfPresent(companyDriveWorkbookFileNames, "novasoft-tech", env.get("NOVASOFT_TECH_CRM_DRIVE_FILE_NAME"));
 
             Map<String, String> companyProjectSummaryDriveWorkbookFileNames = new HashMap<>();
+            putIfPresent(companyProjectSummaryDriveWorkbookFileNames, "ripple-mic", env.get("RIPPLE_MIC_PROJECT_SUMMARY_DRIVE_FILE_NAME"));
             putIfPresent(companyProjectSummaryDriveWorkbookFileNames, "momentum-growth", env.get("MOMENTUM_GROWTH_PROJECT_SUMMARY_DRIVE_FILE_NAME"));
 
             if (companyWorkbooks.isEmpty()

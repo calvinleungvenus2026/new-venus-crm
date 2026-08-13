@@ -25,10 +25,19 @@ Per-company workbook source:
    `TRINITY_CONCIERGE_CRM_XLSX_PATH`
    `RIPPLESOFT_CRM_XLSX_PATH`
    `RIPPLE_MIC_CRM_XLSX_PATH`
+   `RIPPLE_MIC_PROJECT_SUMMARY_XLSX_PATH`
    `LUMINARYTECH_CRM_XLSX_PATH`
    `MOMENTUM_GROWTH_CRM_XLSX_PATH`
+   `MOMENTUM_GROWTH_PROJECT_SUMMARY_XLSX_PATH`
 3. When a company workbook path is present, that company reads from its `.xlsx` file instead of Google Drive folders
 4. Companies without a workbook path continue using the Google Drive fallback
+
+Separate project summary / invoice detail workbooks can also be configured through:
+
+- `RIPPLE_MIC_PROJECT_SUMMARY_DRIVE_FILE_ID`
+- `RIPPLE_MIC_PROJECT_SUMMARY_DRIVE_FILE_NAME`
+- `MOMENTUM_GROWTH_PROJECT_SUMMARY_DRIVE_FILE_ID`
+- `MOMENTUM_GROWTH_PROJECT_SUMMARY_DRIVE_FILE_NAME`
 
 Google Drive fallback setup:
 
